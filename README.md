@@ -183,7 +183,7 @@ This is the pre-Stripe commercial-control release. It establishes the lifecycle 
 
 Plans can now store editable Stripe Product and Price IDs. The existing RWExec Reservations Business plan is automatically mapped to the initial Stripe sandbox product/price during migration.
 
-## Stripe sandbox integration (v0.4.0)
+## Stripe sandbox integration (v0.4.1)
 
 Required Railway variables:
 

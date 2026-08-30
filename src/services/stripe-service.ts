@@ -188,7 +188,7 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
     throw new Error("Stripe subscription payload is missing subscription, customer or price information.");
   }
 
-  const plan = await prisma.plan.findUnique({ where: { stripePriceId }, include: { product: true } });
+  const plan = await prisma.plan.findUnique({ where: { stripePriceId: priceId }, include: { product: true } });
   if (!plan) {
     await writeAudit({
       action: "stripe.subscription_ignored",
