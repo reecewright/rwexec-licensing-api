@@ -79,8 +79,38 @@ router.get("/", async (_req, res, next) => {
 router.get("/customers", async (_req, res, next) => {
   try {
     const customers = await prisma.customer.findMany({ orderBy: { createdAt: "desc" }, include: { _count: { select: { licenses: true, subscriptions: true } } } });
-    const body = `<section class="panel"><h2>All customers</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Subscriptions</th><th>Licences</th><th>Created</th></tr></thead><tbody>${customers.length ? customers.map(c => `<tr><td>${escapeHtml(c.name || "—")}</td><td>${escapeHtml(c.email)}</td><td>${c._count.subscriptions}</td><td>${c._count.licenses}</td><td>${date(c.createdAt)}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No customers yet.</td></tr>`}</tbody></table></div></section>`;
+    const body = `<section class="panel"><h2>All customers</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Account email</th><th>Billing email</th><th>Subscriptions</th><th>Licences</th><th></th></tr></thead><tbody>${customers.length ? customers.map(c => `<tr><td>${escapeHtml(c.name || "—")}</td><td>${escapeHtml(c.email)}</td><td>${escapeHtml(c.billingEmail || "Same as account")}</td><td>${c._count.subscriptions}</td><td>${c._count.licenses}</td><td><a class="table-action" href="/admin/customers/${escapeHtml(c.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No customers yet.</td></tr>`}</tbody></table></div></section>`;
     res.send(layout("Customers", body, "customers"));
+  } catch (error) { next(error); }
+});
+
+router.get("/customers/:id", async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.params.id },
+      include: {
+        subscriptions: { orderBy: { createdAt: "desc" }, include: { product: true, plan: true } },
+        licenses: { orderBy: { createdAt: "desc" }, include: { product: true, activations: { where: { deactivatedAt: null } } } }
+      }
+    });
+    if (!customer) return res.status(404).send(layout("Customer not found", `<div class="alert error">Customer not found.</div>`, "customers"));
+    const saved = req.query.saved === "1" ? `<div class="alert success">Customer details updated.</div>` : "";
+    const body = `${saved}<div class="split customer-detail"><section class="panel"><h2>Customer details</h2><form class="form-grid" action="/admin/customers/${escapeHtml(customer.id)}" method="post"><label>Customer / business name<input name="name" value="${escapeHtml(customer.name || "")}" placeholder="Business or customer name"></label><label>Account email <span class="muted">Used as the main RWExec contact and customer identity.</span><input type="email" name="email" value="${escapeHtml(customer.email)}" required></label><label>Billing email <span class="muted">Optional. Leave blank to use the account email.</span><input type="email" name="billing_email" value="${escapeHtml(customer.billingEmail || "")}" placeholder="billing@example.com"></label><button class="button primary" type="submit">Save customer</button></form></section><section class="panel"><h2>Account overview</h2><dl class="detail-list"><div><dt>Created</dt><dd>${date(customer.createdAt)}</dd></div><div><dt>Subscriptions</dt><dd>${customer.subscriptions.length}</dd></div><div><dt>Licences</dt><dd>${customer.licenses.length}</dd></div></dl></section></div><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Plan</th><th>Status</th><th>Period end</th></tr></thead><tbody>${customer.subscriptions.length ? customer.subscriptions.map(sub => `<tr><td>${escapeHtml(sub.product.name)}</td><td>${escapeHtml(sub.plan?.name || "Custom")}</td><td><span class="status ${sub.status.toLowerCase()}">${escapeHtml(sub.status.replaceAll("_", " "))}</span></td><td>${date(sub.currentPeriodEnd)}</td></tr>`).join("") : `<tr><td colspan="4" class="muted">No subscriptions.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Licences</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Licence</th><th>Status</th><th>Activations</th><th>Expiry</th></tr></thead><tbody>${customer.licenses.length ? customer.licenses.map(licence => `<tr><td>${escapeHtml(licence.product.name)}</td><td>•••• ${escapeHtml(licence.keyLastFour)}</td><td><span class="status ${licence.status.toLowerCase()}">${escapeHtml(licence.status)}</span></td><td>${licence.activations.length} / ${licence.activationLimit}</td><td>${date(licence.expiresAt)}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No licences.</td></tr>`}</tbody></table></div></section>`;
+    res.send(layout(customer.name || customer.email, body, "customers"));
+  } catch (error) { next(error); }
+});
+
+router.post("/customers/:id", async (req, res, next) => {
+  try {
+    const name = String(req.body.name ?? "").trim() || null;
+    const email = String(req.body.email ?? "").trim().toLowerCase();
+    const billingEmail = String(req.body.billing_email ?? "").trim().toLowerCase() || null;
+    if (!email) return res.status(400).send(layout("Customer", `<div class="alert error">Account email is required.</div>`, "customers"));
+    if (billingEmail && !/^\S+@\S+\.\S+$/.test(billingEmail)) return res.status(400).send(layout("Customer", `<div class="alert error">Billing email is not valid.</div>`, "customers"));
+    const existing = await prisma.customer.findFirst({ where: { email, NOT: { id: req.params.id } } });
+    if (existing) return res.status(409).send(layout("Customer", `<div class="alert error">That account email already belongs to another customer.</div>`, "customers"));
+    await prisma.customer.update({ where: { id: req.params.id }, data: { name, email, billingEmail } });
+    res.redirect(`/admin/customers/${encodeURIComponent(req.params.id)}?saved=1`);
   } catch (error) { next(error); }
 });
 
@@ -135,7 +165,7 @@ router.get("/subscriptions", async (_req, res, next) => {
       prisma.product.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.plan.findMany({ where: { active: true }, orderBy: { name: "asc" }, include: { product: true } })
     ]);
-    const body = `<div class="split"><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Product / plan</th><th>Status</th><th>Period end</th><th>Provider</th></tr></thead><tbody>${subscriptions.length ? subscriptions.map(s => `<tr><td>${escapeHtml(s.customer.name || s.customer.email)}<div class="muted">${escapeHtml(s.customer.email)}</div></td><td>${escapeHtml(s.product.name)}<div class="muted">${escapeHtml(s.plan?.name || "Custom")}</div></td><td><span class="status ${s.status.toLowerCase()}">${escapeHtml(s.status.replaceAll("_"," "))}</span></td><td>${date(s.currentPeriodEnd)}</td><td>${escapeHtml(s.complimentary ? "Complimentary" : s.externalProvider || "Manual")}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Add manual subscription</h2><form class="form-grid" action="/admin/subscriptions" method="post"><label>Customer email<input type="email" name="customer_email" required></label><label>Customer name<input name="customer_name"></label><label>Product<select name="product_id">${products.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}</select></label><label>Plan<select name="plan_id"><option value="">Custom / no plan</option>${plans.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.product.name)} — ${escapeHtml(p.name)}</option>`).join("")}</select></label><label class="checkbox-card"><input type="checkbox" name="complimentary" value="1"><span class="checkbox-copy"><span class="checkbox-title">Complimentary / no billing</span><span class="checkbox-help">No payment required. Leave the period end blank for a permanent complimentary subscription.</span></span></label><label>Current period end<input type="date" name="current_period_end"></label><button class="button primary" type="submit">Create subscription</button></form></section></div>`;
+    const body = `<div class="split"><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Product / plan</th><th>Status</th><th>Period end</th><th>Provider</th></tr></thead><tbody>${subscriptions.length ? subscriptions.map(s => `<tr><td>${escapeHtml(s.customer.name || s.customer.email)}<div class="muted">${escapeHtml(s.customer.email)}</div></td><td>${escapeHtml(s.product.name)}<div class="muted">${escapeHtml(s.plan?.name || "Custom")}</div></td><td><span class="status ${s.status.toLowerCase()}">${escapeHtml(s.status.replaceAll("_"," "))}</span></td><td>${date(s.currentPeriodEnd)}</td><td>${escapeHtml(s.complimentary ? "Complimentary" : s.externalProvider || "Manual")}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Add manual subscription</h2><form class="form-grid" action="/admin/subscriptions" method="post"><label>Customer email<input type="email" name="customer_email" required></label><label>Customer name<input name="customer_name"></label><label>Billing email <span class="muted">Optional — can be changed later from Customers.</span><input type="email" name="billing_email"></label><label>Product<select name="product_id">${products.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}</select></label><label>Plan<select name="plan_id"><option value="">Custom / no plan</option>${plans.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.product.name)} — ${escapeHtml(p.name)}</option>`).join("")}</select></label><label class="checkbox-card"><input type="checkbox" name="complimentary" value="1"><span class="checkbox-copy"><span class="checkbox-title">Complimentary / no billing</span><span class="checkbox-help">No payment required. Leave the period end blank for a permanent complimentary subscription.</span></span></label><label>Current period end<input type="date" name="current_period_end"></label><button class="button primary" type="submit">Create subscription</button></form></section></div>`;
     res.send(layout("Subscriptions", body, "subscriptions"));
   } catch (error) { next(error); }
 });
@@ -143,7 +173,8 @@ router.get("/subscriptions", async (_req, res, next) => {
 router.post("/subscriptions", async (req, res, next) => {
   try {
     const email = String(req.body.customer_email).trim().toLowerCase();
-    const customer = await prisma.customer.upsert({ where: { email }, update: { name: String(req.body.customer_name ?? "").trim() || undefined }, create: { email, name: String(req.body.customer_name ?? "").trim() || null } });
+    const billingEmail = String(req.body.billing_email ?? "").trim().toLowerCase() || null;
+    const customer = await prisma.customer.upsert({ where: { email }, update: { name: String(req.body.customer_name ?? "").trim() || undefined, ...(billingEmail ? { billingEmail } : {}) }, create: { email, name: String(req.body.customer_name ?? "").trim() || null, billingEmail } });
     const complimentary = req.body.complimentary === "1";
     await prisma.subscription.create({ data: { customerId: customer.id, productId: String(req.body.product_id), planId: String(req.body.plan_id ?? "") || null, status: complimentary ? "COMPLIMENTARY" : "ACTIVE", complimentary, currentPeriodEnd: req.body.current_period_end ? new Date(`${req.body.current_period_end}T23:59:59.000Z`) : null } });
     res.redirect("/admin/subscriptions");

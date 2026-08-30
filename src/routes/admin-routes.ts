@@ -50,6 +50,25 @@ router.get("/customers", async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
+const updateCustomerSchema = z.object({
+  name: z.string().trim().max(200).nullable().optional(),
+  email: z.email().optional(),
+  billing_email: z.email().nullable().optional()
+});
+
+router.patch("/customers/:id", async (req, res, next) => {
+  try {
+    const parsed = updateCustomerSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+    const data: { name?: string | null; email?: string; billingEmail?: string | null } = {};
+    if (parsed.data.name !== undefined) data.name = parsed.data.name;
+    if (parsed.data.email !== undefined) data.email = parsed.data.email.toLowerCase();
+    if (parsed.data.billing_email !== undefined) data.billingEmail = parsed.data.billing_email?.toLowerCase() ?? null;
+    const customer = await prisma.customer.update({ where: { id: req.params.id }, data });
+    res.json(customer);
+  } catch (error) { next(error); }
+});
+
 router.get("/plans", async (_req, res, next) => {
   try {
     const plans = await prisma.plan.findMany({ orderBy: { name: "asc" }, include: { product: true, entitlements: true } });
@@ -102,6 +121,7 @@ router.get("/subscriptions", async (_req, res, next) => {
 const createSubscriptionSchema = z.object({
   customer_email: z.email(),
   customer_name: z.string().trim().max(200).optional(),
+  billing_email: z.email().nullable().optional(),
   product: z.string().min(2),
   plan: z.string().min(1).nullable().optional(),
   complimentary: z.boolean().default(false),
@@ -117,7 +137,7 @@ router.post("/subscriptions", async (req, res, next) => {
     if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
     const product = await prisma.product.findUnique({ where: { slug: parsed.data.product } });
     if (!product) return res.status(404).json({ error: "product_not_found" });
-    const customer = await prisma.customer.upsert({ where: { email: parsed.data.customer_email.toLowerCase() }, update: { name: parsed.data.customer_name }, create: { email: parsed.data.customer_email.toLowerCase(), name: parsed.data.customer_name } });
+    const customer = await prisma.customer.upsert({ where: { email: parsed.data.customer_email.toLowerCase() }, update: { name: parsed.data.customer_name, ...(parsed.data.billing_email !== undefined ? { billingEmail: parsed.data.billing_email?.toLowerCase() ?? null } : {}) }, create: { email: parsed.data.customer_email.toLowerCase(), name: parsed.data.customer_name, billingEmail: parsed.data.billing_email?.toLowerCase() ?? null } });
     let planId: string | null = null;
     if (parsed.data.plan) {
       const plan = await prisma.plan.findUnique({ where: { productId_slug: { productId: product.id, slug: parsed.data.plan } } });
