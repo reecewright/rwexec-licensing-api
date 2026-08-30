@@ -62,6 +62,8 @@ model Plan {
   billingInterval String?
   priceMinor      Int?
   currency        String            @default("GBP")
+  stripeProductId String?
+  stripePriceId   String?            @unique
   active          Boolean           @default(true)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt

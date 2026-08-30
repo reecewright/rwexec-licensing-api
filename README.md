@@ -13,7 +13,7 @@ The seed currently registers:
 
 Additional RWExec products can be added through the admin dashboard or admin API.
 
-## What v0.3.1 adds
+## What v0.3.2 adds
 
 - Licence records are now linked directly to the subscription that granted them.
 - Licence activation/validation now checks that linked subscription entitlement is still active.
@@ -74,7 +74,7 @@ Railway supplies `PORT` automatically.
 
 The production start path is `dist/src/server.js` because the TypeScript project includes both `src` and `prisma` under the project root.
 
-v0.3.1 includes a database migration and Railway should apply it automatically via the configured pre-deploy command. No new seed data is required when upgrading from v0.2.3. If Railway ever deploys without applying the migration, run `npm run prisma:migrate:deploy` once in the service shell.
+v0.3.2 includes a database migration and Railway should apply it automatically via the configured pre-deploy command. No new seed data is required when upgrading from v0.2.3. If Railway ever deploys without applying the migration, run `npm run prisma:migrate:deploy` once in the service shell.
 
 ## Public licence endpoints
 
@@ -174,6 +174,11 @@ npm run dev
 - No database migration is required from v0.2.2.
 
 
-## v0.3.1
+## v0.3.2
 
 This is the pre-Stripe commercial-control release. It establishes the lifecycle actions and subscription-to-licence relationship that Stripe webhooks will update later, without adding Stripe credentials or payment processing yet.
+
+
+## v0.3.2
+
+Plans can now store editable Stripe Product and Price IDs. The existing RWExec Reservations Business plan is automatically mapped to the initial Stripe sandbox product/price during migration.
