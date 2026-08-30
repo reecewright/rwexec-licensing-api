@@ -4,9 +4,33 @@ import { prisma } from "../db.js";
 import { requireAdminApiKey } from "../middleware/admin-auth.js";
 import { generateLicenseKey, hashLicenseKey } from "../utils/license-key.js";
 import { writeAudit } from "../services/audit-service.js";
+import { createCheckoutSession } from "../services/stripe-service.js";
 
 const router = Router();
 router.use(requireAdminApiKey);
+
+const stripeCheckoutSchema = z.object({
+  plan_id: z.string().min(1),
+  customer_email: z.email().optional(),
+  customer_name: z.string().trim().min(1).optional(),
+  success_url: z.url(),
+  cancel_url: z.url()
+});
+
+router.post("/stripe/checkout", async (req, res, next) => {
+  try {
+    const parsed = stripeCheckoutSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+    const session = await createCheckoutSession({
+      planId: parsed.data.plan_id,
+      customerEmail: parsed.data.customer_email,
+      customerName: parsed.data.customer_name,
+      successUrl: parsed.data.success_url,
+      cancelUrl: parsed.data.cancel_url
+    });
+    res.status(201).json({ id: session.id, url: session.url });
+  } catch (error) { next(error); }
+});
 
 const createLicenseSchema = z.object({
   product: z.string().min(2).max(100),

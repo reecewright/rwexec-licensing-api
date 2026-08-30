@@ -182,3 +182,29 @@ This is the pre-Stripe commercial-control release. It establishes the lifecycle 
 ## v0.3.2
 
 Plans can now store editable Stripe Product and Price IDs. The existing RWExec Reservations Business plan is automatically mapped to the initial Stripe sandbox product/price during migration.
+
+## Stripe sandbox integration (v0.4.0)
+
+Required Railway variables:
+
+- `STRIPE_SECRET_KEY` — sandbox or live Stripe secret key. Never commit it.
+- `STRIPE_WEBHOOK_SECRET` — signing secret for the matching Stripe event destination. Never commit it.
+
+Webhook endpoint:
+
+`POST /v1/stripe/webhook`
+
+The endpoint verifies Stripe's `Stripe-Signature` header against the exact raw request body, rejects stale/invalid signatures, records processed Stripe event IDs for idempotency, and synchronises mapped RWExec plans using the plan's Stripe Price ID.
+
+Handled events:
+
+- `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `invoice.paid`
+- `invoice.payment_failed`
+
+For a mapped Stripe subscription the backend creates or updates the RWExec customer/subscription and automatically creates a licence if one does not already exist. Raw licence keys remain non-retrievable by design; use the admin licence regeneration action when a key needs to be issued manually. Customer-facing key delivery/account portal work should be completed before live sales.
+
+An admin-authenticated sandbox helper is available at `POST /v1/admin/stripe/checkout` to create a Stripe Checkout subscription session for an RWExec plan. This is intended for integration testing before the public RWExec website checkout is connected.

@@ -6,7 +6,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   LICENSE_KEY_PEPPER: z.string().min(32),
-  ADMIN_API_KEY: z.string().min(32)
+  ADMIN_API_KEY: z.string().min(32),
+  STRIPE_SECRET_KEY: z.string().min(1),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1)
 });
 
 const parsed = envSchema.safeParse(process.env);
