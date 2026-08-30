@@ -1,207 +1,159 @@
 # RWExec Licensing API
 
-Railway-ready licensing backend for RWExec software products.
+Central commercial backend for RWExec products.
 
-Version: **0.1.0**
+Version **0.2.0** expands the original Reservations licensing API into a multi-product customer, plan, subscription, entitlement and licence service with a built-in RWExec Admin dashboard.
 
-## Included
+## Products
 
-- Node.js + TypeScript
-- Express REST API
-- PostgreSQL
-- Prisma ORM
-- Hashed licence keys using HMAC-SHA256 + server-side pepper
-- Multiple RWExec products
-- Customer records
-- Licence expiry/status
-- Per-licence activation limits
-- Per-installation UUID binding
-- Site URL binding
-- Activate / validate / deactivate endpoints
-- Protected admin licence creation endpoint
-- Railway deployment config
-- Health endpoint
-- Rate limiting
-- Helmet security headers
+The seed currently registers:
 
-The full raw licence key is not stored in the database. The API stores an HMAC hash plus the last four characters for identification.
+- `rwexec-reservations` — RWExec Reservations
+- `rwexec-signage` — RWExec Signage
 
-## API structure
+Additional RWExec products can be added through the admin dashboard or admin API.
 
-Public plugin endpoints:
+## What v0.2.0 adds
 
-- `POST /v1/licenses/activate`
-- `POST /v1/licenses/validate`
-- `POST /v1/licenses/deactivate`
+- Multi-product catalogue
+- Customers shared across RWExec products
+- Plans with price/billing metadata
+- Boolean and numeric-limit entitlements
+- Subscriptions, including complimentary/manual subscriptions
+- External billing IDs ready for a later Stripe webhook integration
+- Usage counters ready for limits such as Signage screen/device allowances
+- Internal RWExec Admin dashboard
+- Manual complimentary licence creation from the browser
+- Existing Reservations activate / validate / deactivate API retained
+- Existing admin API retained and expanded
 
-Internal/admin endpoints:
+## RWExec Admin
 
-- `POST /v1/admin/licenses`
-- `GET /v1/admin/licenses/:id`
+After deployment, open:
 
-Health check:
+`https://licensing.rwexec.com/admin`
 
-- `GET /health`
+Sign in using the current `ADMIN_API_KEY` Railway variable. The key is exchanged for a secure, HttpOnly, SameSite session cookie and is not stored in the browser as a normal preference/local-storage value.
 
-## Railway setup
+The dashboard contains:
 
-Create a new service for this project and a PostgreSQL database in Railway.
+- Dashboard totals
+- Customers
+- Products
+- Plans and entitlements
+- Subscriptions
+- Licences
 
-Set these environment variables on the API service:
+The Licences page can create permanent complimentary licences by leaving the expiry date blank.
 
-```env
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-LICENSE_KEY_PEPPER=<long random secret>
-ADMIN_API_KEY=<long random secret>
+## Environment variables
+
+Required:
+
+```text
+DATABASE_URL=postgresql://...
+LICENSE_KEY_PEPPER=long-random-secret
+ADMIN_API_KEY=different-long-random-secret
 NODE_ENV=production
 ```
 
-Railway supplies `PORT` automatically. The application defaults to port 3000 locally.
+Do not rotate `LICENSE_KEY_PEPPER` after licences have been issued. Existing raw licence keys are hashed using this value.
 
-`railway.json` runs:
+`ADMIN_API_KEY` can be rotated when required; existing browser admin sessions will become invalid and administrators will sign in again with the new key.
 
-1. `npm ci`
-2. `prisma generate`
-3. TypeScript build
-4. `prisma migrate deploy`
-5. `npm start`
+Railway supplies `PORT` automatically.
 
-The Railway health check is `/health`.
+## Railway deployment
 
-After the first deployment, seed the RWExec Reservations product once:
+`railway.json` is configured to:
+
+1. Generate Prisma Client and build TypeScript during the build phase.
+2. Run `npm run prisma:migrate:deploy` before deployment.
+3. Start with `npm start`.
+4. Health-check `/health`.
+
+The production start path is `dist/src/server.js` because the TypeScript project includes both `src` and `prisma` under the project root.
+
+After deploying v0.2.0, run once in the Railway service shell:
 
 ```bash
 npm run seed
 ```
 
-You can run this from a Railway shell or locally against the Railway database.
+This keeps RWExec Reservations and adds RWExec Signage to the product table.
 
-## Suggested domain
+## Public licence endpoints
 
-Point:
+### Activate
 
-`licensing.rwexec.com`
+`POST /v1/licenses/activate`
 
-to the Railway licensing API service.
+### Validate
 
-The plugin will later use:
+`POST /v1/licenses/validate`
 
-```text
-https://licensing.rwexec.com/v1/licenses/activate
-https://licensing.rwexec.com/v1/licenses/validate
-https://licensing.rwexec.com/v1/licenses/deactivate
-```
+### Deactivate
 
-## Create a licence manually
+`POST /v1/licenses/deactivate`
 
-Send:
-
-```http
-POST /v1/admin/licenses
-X-RWExec-Admin-Key: YOUR_ADMIN_API_KEY
-Content-Type: application/json
-```
-
-Body:
+Example payload:
 
 ```json
 {
-  "product": "rwexec-reservations",
-  "customer_email": "customer@example.com",
-  "customer_name": "Example Customer",
-  "activation_limit": 1,
-  "expires_at": "2027-08-30T23:59:59Z"
-}
-```
-
-Example response:
-
-```json
-{
-  "id": "licence-record-id",
-  "license_key": "RWRES-ABCD-EFGH-JKLM-NPQR",
-  "product": "rwexec-reservations",
-  "status": "active",
-  "activation_limit": 1,
-  "expires_at": "2027-08-30T23:59:59.000Z",
-  "note": "This is the only response containing the full raw licence key."
-}
-```
-
-Save or deliver the returned licence key because the server does not retain the plaintext value.
-
-## Activate from a WordPress plugin
-
-```http
-POST /v1/licenses/activate
-Content-Type: application/json
-```
-
-```json
-{
-  "license_key": "RWRES-ABCD-EFGH-JKLM-NPQR",
+  "license_key": "RWRES-XXXX-XXXX-XXXX-XXXX",
   "product": "rwexec-reservations",
   "site_url": "https://restaurant.example",
-  "instance_id": "0ce206d0-777e-4b0a-af9c-672e1c92681d",
+  "instance_id": "installation-uuid",
   "version": "0.11.0"
 }
 ```
 
-Successful response:
+## Admin API
 
-```json
-{
-  "valid": true,
-  "status": "active",
-  "expires_at": "2027-08-30T23:59:59.000Z",
-  "activation_limit": 1,
-  "activations": 1,
-  "activation_id": "activation-record-id"
-}
+All `/v1/admin/*` requests require:
+
+```text
+X-RWExec-Admin-Key: <ADMIN_API_KEY>
 ```
 
-The same payload is used for `/validate` and `/deactivate`.
+Available resources now include:
 
-## Licence behaviour
+- `GET /v1/admin/dashboard`
+- `GET/POST /v1/admin/products`
+- `GET /v1/admin/customers`
+- `GET/POST /v1/admin/plans`
+- `GET/POST /v1/admin/subscriptions`
+- `GET/POST /v1/admin/licenses`
+- `GET /v1/admin/licenses/:id`
 
-A licence can be:
+The raw full licence key is returned only at creation. The database stores only its HMAC hash and last four characters.
 
-- active
-- expired
-- suspended
-- revoked
+## Commercial model
 
-Activation is tied to both:
+Reservations and Signage can share one customer while using different entitlement styles:
 
-- WordPress site URL
-- a generated installation UUID (`instance_id`)
+- **RWExec Reservations:** site activation licences, update/support/premium-feature entitlement.
+- **RWExec Signage:** account subscription with a numeric screen/device allowance, e.g. `screens = 5`.
 
-A licence can be re-activated by the same installation without consuming another activation.
+A future Stripe integration should create/update `Subscription` rows from verified Stripe webhooks. The product clients should consume subscription/entitlement state from the RWExec backend rather than talk directly to Stripe.
 
-Deactivation releases the activation slot.
+Core restaurant reservation operation should not be destroyed or data-locked merely because a subscription expires. Entitlements should control commercial services such as updates, support and premium capabilities.
+
+## Local development
+
+```bash
+npm install
+npm run prisma:generate
+npm run prisma:migrate:dev
+npm run seed
+npm run dev
+```
 
 ## Security notes
 
-- Do not commit `.env`.
-- Use long randomly generated values for `LICENSE_KEY_PEPPER` and `ADMIN_API_KEY`.
-- Never expose `ADMIN_API_KEY` inside a WordPress plugin.
-- Keep all administrative licence creation on your own backend/server-side systems.
-- The API only returns the full raw licence key at creation time.
-- Railway should terminate HTTPS for the service/custom domain.
-- The future WordPress client should cache successful validation and use a grace period if the licensing API is temporarily unreachable.
-
-## Next build
-
-The next stage is the RWExec Reservations WordPress client:
-
-- Settings → Licence tab
-- licence key input
-- Activate Licence
-- Deactivate Licence
-- status/expiry display
-- installation UUID
-- automatic validation
-- cached successful validation/grace period
-- later, entitlement-based automatic updates
-
-Payment/Stripe integration remains separate. Stripe webhooks can later create and renew licence records through internal server-side logic without changing the WordPress plugin API.
+- Never commit `.env` or Railway secret values.
+- Keep `LICENSE_KEY_PEPPER` and `ADMIN_API_KEY` different.
+- Admin JSON routes use timing-safe API-key comparison.
+- Admin browser sessions are signed using the admin secret and use HttpOnly/SameSite cookies.
+- Production should remain HTTPS-only.
+- Stripe webhook signing secrets, when added, must be separate secrets and verified on every webhook.
