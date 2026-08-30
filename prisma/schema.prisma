@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+  REVOKED
+}
+
+model Product {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  licenses  License[]
+}
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String?
+  email     String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  licenses  License[]
+}
+
+model License {
+  id              String         @id @default(cuid())
+  keyHash         String         @unique
+  keyLastFour     String
+  status          LicenseStatus  @default(ACTIVE)
+  activationLimit Int            @default(1)
+  expiresAt       DateTime?
+  productId       String
+  customerId      String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  product         Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  activations     Activation[]
+
+  @@index([productId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model Activation {
+  id            String    @id @default(cuid())
+  licenseId     String
+  siteUrl       String
+  instanceId    String
+  pluginVersion String?
+  activatedAt   DateTime  @default(now())
+  lastCheckedAt DateTime  @default(now())
+  deactivatedAt DateTime?
+
+  license       License   @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, instanceId])
+  @@index([licenseId, deactivatedAt])
+  @@index([siteUrl])
+}
