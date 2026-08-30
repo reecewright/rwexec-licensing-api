@@ -4,6 +4,8 @@ import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { generateLicenseKey, hashLicenseKey } from "../utils/license-key.js";
 import { writeAudit } from "./audit-service.js";
+import { storeLicenceDelivery } from "./customer-portal-service.js";
+import { customerEmailConfigured, sendCustomerPortalEmail } from "./email-service.js";
 
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const WEBHOOK_TOLERANCE_SECONDS = 300;
@@ -67,6 +69,11 @@ export async function createCheckoutSession(input: {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString()
   });
+}
+
+
+export async function retrieveCheckoutSession(sessionId: string) {
+  return stripeRequest(`/checkout/sessions/${encodeURIComponent(sessionId)}`);
 }
 
 export function verifyStripeSignature(rawBody: Buffer, signatureHeader: string | undefined) {
@@ -168,15 +175,25 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
     }
   });
 
+  await storeLicenceDelivery(licence.id, subscription.customerId, rawKey);
+
   await writeAudit({
     action: "license.stripe_auto_created",
     entityType: "license",
     entityId: licence.id,
     summary: `Licence automatically created for Stripe subscription (${subscription.customer.email})`,
-    metadata: { subscriptionId: subscription.id, keyLastFour: licence.keyLastFour }
+    metadata: { subscriptionId: subscription.id, keyLastFour: licence.keyLastFour, deliveryPrepared: true }
   });
 
-  // The raw key is intentionally not persisted. It can be regenerated from the admin UI for delivery.
+  if (customerEmailConfigured()) {
+    try {
+      await sendCustomerPortalEmail(subscription.customerId, "licence");
+    } catch (error) {
+      console.error("Could not send automatic licence delivery email:", error);
+      await writeAudit({ action: "license.delivery_email_failed", entityType: "license", entityId: licence.id, summary: `Automatic licence delivery email failed for ${subscription.customer.email}` });
+    }
+  }
+
   return licence;
 }
 

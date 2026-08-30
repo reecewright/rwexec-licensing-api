@@ -5,6 +5,7 @@ import { requireAdminApiKey } from "../middleware/admin-auth.js";
 import { generateLicenseKey, hashLicenseKey } from "../utils/license-key.js";
 import { writeAudit } from "../services/audit-service.js";
 import { createCheckoutSession } from "../services/stripe-service.js";
+import { storeLicenceDelivery } from "../services/customer-portal-service.js";
 
 const router = Router();
 router.use(requireAdminApiKey);
@@ -215,6 +216,7 @@ router.post("/licenses", async (req, res, next) => {
       expiresAt: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null,
       productId: product.id, customerId
     } });
+    if (customerId) await storeLicenceDelivery(license.id, customerId, rawKey);
     res.status(201).json({ id: license.id, license_key: rawKey, product: product.slug, status: "active", activation_limit: license.activationLimit, expires_at: license.expiresAt?.toISOString() ?? null, note: "This is the only response containing the full raw licence key." });
   } catch (error) { next(error); }
 });
@@ -296,6 +298,7 @@ router.post("/licenses/from-subscription", async (req, res, next) => {
     }
     if (!rawKey || !keyHash) throw new Error("Could not generate a unique licence key.");
     const licence = await prisma.license.create({ data: { keyHash, keyLastFour: rawKey.slice(-4), productId: subscription.productId, customerId: subscription.customerId, subscriptionId: subscription.id, activationLimit: parsed.data.activation_limit, expiresAt: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null } });
+    await storeLicenceDelivery(licence.id, subscription.customerId, rawKey);
     await writeAudit({ action: "license.api_created", entityType: "license", entityId: licence.id, summary: `Licence created from subscription for ${subscription.customer.name || subscription.customer.email}`, metadata: { subscriptionId: subscription.id } });
     res.status(201).json({ id: licence.id, license_key: rawKey, key_last_four: licence.keyLastFour, status: "active", activation_limit: licence.activationLimit, expires_at: licence.expiresAt?.toISOString() ?? null, subscription_id: subscription.id, note: "This is the only response containing the full raw licence key." });
   } catch (error) { next(error); }
@@ -341,6 +344,7 @@ router.post("/licenses/:id/regenerate", async (req, res, next) => {
     }
     if (!rawKey || !keyHash) throw new Error("Could not generate a unique licence key.");
     const updated = await prisma.license.update({ where: { id: licence.id }, data: { keyHash, keyLastFour: rawKey.slice(-4) } });
+    if (licence.customerId) await storeLicenceDelivery(licence.id, licence.customerId, rawKey);
     await writeAudit({ action: "license.regenerated", entityType: "license", entityId: licence.id, summary: `Licence key regenerated for •••• ${licence.keyLastFour}` });
     res.json({ id: updated.id, license_key: rawKey, key_last_four: updated.keyLastFour, note: "This is the only response containing the full replacement key." });
   } catch (error) { next(error); }

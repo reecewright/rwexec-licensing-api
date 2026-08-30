@@ -5,6 +5,7 @@ import { adminRouter } from "./routes/admin-routes.js";
 import { adminWebRouter } from "./routes/admin-web-routes.js";
 import { licenseRouter } from "./routes/license-routes.js";
 import { stripeWebhookRouter } from "./routes/stripe-routes.js";
+import { customerPortalRouter } from "./routes/customer-portal-routes.js";
 
 export const app = express();
 
@@ -22,6 +23,8 @@ app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "rwexec-licensing-api" });
 });
+
+app.use("/account", rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false }), customerPortalRouter);
 
 app.use("/admin", rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }), adminWebRouter);
 

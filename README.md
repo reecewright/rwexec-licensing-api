@@ -208,3 +208,11 @@ Handled events:
 For a mapped Stripe subscription the backend creates or updates the RWExec customer/subscription and automatically creates a licence if one does not already exist. Raw licence keys remain non-retrievable by design; use the admin licence regeneration action when a key needs to be issued manually. Customer-facing key delivery/account portal work should be completed before live sales.
 
 An admin-authenticated sandbox helper is available at `POST /v1/admin/stripe/checkout` to create a Stripe Checkout subscription session for an RWExec plan. This is intended for integration testing before the public RWExec website checkout is connected.
+
+## Customer portal and licence delivery (v0.5.0)
+
+`/account` is a passwordless customer portal. Customers sign in using a 30-minute, one-use magic link. Stripe-created and regenerated licence keys are encrypted at rest for a seven-day delivery window and can be revealed exactly once from the customer portal. After reveal, the encrypted payload is cleared; a lost key must be regenerated, which invalidates the previous key.
+
+Optional automatic email delivery uses Resend. Set `RESEND_API_KEY`, `EMAIL_FROM` and (if required) `PUBLIC_BASE_URL`. If email is not configured, admins can still generate a one-time portal link from a customer record and send it manually.
+
+For a hosted checkout success flow during integration, set Stripe Checkout success URLs to `/account` or to your own `rwexec.com` success page. The public website can later link customers to `https://licensing.rwexec.com/account` without exposing any admin secrets.

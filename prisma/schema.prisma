@@ -51,6 +51,7 @@ model Customer {
   updatedAt     DateTime          @updatedAt
   licenses      License[]
   subscriptions Subscription[]
+  portalTokens  CustomerPortalToken[]
 }
 
 model Plan {
@@ -149,6 +150,7 @@ model License {
   customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
   subscription    Subscription?  @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   activations     Activation[]
+  delivery        LicenseDelivery?
 
   @@index([productId])
   @@index([customerId])
@@ -196,4 +198,34 @@ model WebhookEvent {
 
   @@unique([provider, eventId])
   @@index([provider, type])
+}
+
+model CustomerPortalToken {
+  id         String   @id @default(cuid())
+  customerId String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, expiresAt])
+}
+
+model LicenseDelivery {
+  id         String   @id @default(cuid())
+  licenseId  String   @unique
+  customerId String
+  ciphertext String
+  iv         String
+  authTag    String
+  expiresAt  DateTime
+  claimedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  license    License  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, expiresAt])
 }

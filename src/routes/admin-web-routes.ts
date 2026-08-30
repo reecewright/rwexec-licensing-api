@@ -6,6 +6,8 @@ import { adminCss } from "../admin/styles.js";
 import { escapeHtml, layout, loginPage } from "../admin/html.js";
 import { generateLicenseKey, hashLicenseKey } from "../utils/license-key.js";
 import { writeAudit } from "../services/audit-service.js";
+import { createPortalMagicLink, storeLicenceDelivery } from "../services/customer-portal-service.js";
+import { customerEmailConfigured, sendCustomerPortalEmail } from "../services/email-service.js";
 
 const router = Router();
 
@@ -109,7 +111,7 @@ router.get("/customers/:id", async (req, res, next) => {
     });
     if (!customer) return res.status(404).send(layout("Customer not found", `<div class="alert error">Customer not found.</div>`, "customers"));
     const saved = req.query.saved === "1" ? `<div class="alert success">Customer details updated.</div>` : "";
-    const body = `${saved}<div class="split customer-detail"><section class="panel"><h2>Customer details</h2><form class="form-grid" action="/admin/customers/${escapeHtml(customer.id)}" method="post"><label>Customer / business name<input name="name" value="${escapeHtml(customer.name || "")}" placeholder="Business or customer name"></label><label>Account email <span class="muted">Used as the main RWExec contact and customer identity.</span><input type="email" name="email" value="${escapeHtml(customer.email)}" required></label><label>Billing email <span class="muted">Optional. Leave blank to use the account email.</span><input type="email" name="billing_email" value="${escapeHtml(customer.billingEmail || "")}" placeholder="billing@example.com"></label><button class="button primary" type="submit">Save customer</button></form></section><section class="panel"><h2>Account overview</h2><dl class="detail-list"><div><dt>Created</dt><dd>${date(customer.createdAt)}</dd></div><div><dt>Subscriptions</dt><dd>${customer.subscriptions.length}</dd></div><div><dt>Licences</dt><dd>${customer.licenses.length}</dd></div></dl></section></div><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Plan</th><th>Status</th><th>Period end</th><th></th></tr></thead><tbody>${customer.subscriptions.length ? customer.subscriptions.map(sub => `<tr><td>${escapeHtml(sub.product.name)}</td><td>${escapeHtml(sub.plan?.name || "Custom")}</td><td><span class="status ${sub.status.toLowerCase()}">${escapeHtml(sub.status.replaceAll("_", " "))}</span></td><td>${date(sub.currentPeriodEnd)}</td><td><a class="table-action" href="/admin/subscriptions/${escapeHtml(sub.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Licences</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Licence</th><th>Status</th><th>Activations</th><th>Expiry</th><th></th></tr></thead><tbody>${customer.licenses.length ? customer.licenses.map(licence => `<tr><td>${escapeHtml(licence.product.name)}</td><td>•••• ${escapeHtml(licence.keyLastFour)}</td><td><span class="status ${licence.status.toLowerCase()}">${escapeHtml(licence.status)}</span></td><td>${licence.activations.length} / ${licence.activationLimit}</td><td>${date(licence.expiresAt)}</td><td><a class="table-action" href="/admin/licenses/${escapeHtml(licence.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No licences.</td></tr>`}</tbody></table></div></section>`;
+    const body = `${saved}<div class="split customer-detail"><section class="panel"><h2>Customer details</h2><form class="form-grid" action="/admin/customers/${escapeHtml(customer.id)}" method="post"><label>Customer / business name<input name="name" value="${escapeHtml(customer.name || "")}" placeholder="Business or customer name"></label><label>Account email <span class="muted">Used as the main RWExec contact and customer identity.</span><input type="email" name="email" value="${escapeHtml(customer.email)}" required></label><label>Billing email <span class="muted">Optional. Leave blank to use the account email.</span><input type="email" name="billing_email" value="${escapeHtml(customer.billingEmail || "")}" placeholder="billing@example.com"></label><button class="button primary" type="submit">Save customer</button></form></section><section class="panel"><h2>Account overview</h2><dl class="detail-list"><div><dt>Created</dt><dd>${date(customer.createdAt)}</dd></div><div><dt>Subscriptions</dt><dd>${customer.subscriptions.length}</dd></div><div><dt>Licences</dt><dd>${customer.licenses.length}</dd></div></dl></section></div><section class="panel"><h2>Customer portal</h2><p class="muted">Send a secure, one-time sign-in link to the customer, or generate a link to copy manually while email delivery is being configured.</p><div class="actions"><form method="post" action="/admin/customers/${escapeHtml(customer.id)}/portal-email"><button class="button primary" type="submit" ${customerEmailConfigured() ? "" : "disabled"}>Email portal link</button></form><form method="post" action="/admin/customers/${escapeHtml(customer.id)}/portal-link"><button class="button secondary" type="submit">Generate portal link</button></form></div>${customerEmailConfigured() ? "" : `<p class="muted">Automatic email is currently disabled because RESEND_API_KEY is not configured.</p>`}</section><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Plan</th><th>Status</th><th>Period end</th><th></th></tr></thead><tbody>${customer.subscriptions.length ? customer.subscriptions.map(sub => `<tr><td>${escapeHtml(sub.product.name)}</td><td>${escapeHtml(sub.plan?.name || "Custom")}</td><td><span class="status ${sub.status.toLowerCase()}">${escapeHtml(sub.status.replaceAll("_", " "))}</span></td><td>${date(sub.currentPeriodEnd)}</td><td><a class="table-action" href="/admin/subscriptions/${escapeHtml(sub.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Licences</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Licence</th><th>Status</th><th>Activations</th><th>Expiry</th><th></th></tr></thead><tbody>${customer.licenses.length ? customer.licenses.map(licence => `<tr><td>${escapeHtml(licence.product.name)}</td><td>•••• ${escapeHtml(licence.keyLastFour)}</td><td><span class="status ${licence.status.toLowerCase()}">${escapeHtml(licence.status)}</span></td><td>${licence.activations.length} / ${licence.activationLimit}</td><td>${date(licence.expiresAt)}</td><td><a class="table-action" href="/admin/licenses/${escapeHtml(licence.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No licences.</td></tr>`}</tbody></table></div></section>`;
     res.send(layout(customer.name || customer.email, body, "customers"));
   } catch (error) { next(error); }
 });
@@ -125,6 +127,26 @@ router.post("/customers/:id", async (req, res, next) => {
     if (existing) return res.status(409).send(layout("Customer", `<div class="alert error">That account email already belongs to another customer.</div>`, "customers"));
     await prisma.customer.update({ where: { id: req.params.id }, data: { name, email, billingEmail } });
     res.redirect(`/admin/customers/${encodeURIComponent(req.params.id)}?saved=1`);
+  } catch (error) { next(error); }
+});
+
+
+router.post("/customers/:id/portal-email", async (req, res, next) => {
+  try {
+    if (!customerEmailConfigured()) return res.status(503).send(layout("Customer portal", `<div class="alert error">Customer email delivery is not configured.</div>`, "customers"));
+    await sendCustomerPortalEmail(req.params.id, "login");
+    await writeAudit({ action: "customer.portal_email_admin", entityType: "customer", entityId: req.params.id, summary: "Customer portal link emailed by admin" });
+    res.redirect(`/admin/customers/${encodeURIComponent(req.params.id)}?saved=1`);
+  } catch (error) { next(error); }
+});
+
+router.post("/customers/:id/portal-link", async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({ where: { id: req.params.id } });
+    if (!customer) return res.status(404).send(layout("Customer not found", `<div class="alert error">Customer not found.</div>`, "customers"));
+    const link = await createPortalMagicLink(customer.id);
+    await writeAudit({ action: "customer.portal_link_admin", entityType: "customer", entityId: customer.id, summary: "Customer portal link generated by admin" });
+    res.send(layout("Customer portal link", `<div class="alert success"><strong>One-time customer sign-in link created.</strong> It expires in 30 minutes.</div><div class="panel"><h2>${escapeHtml(customer.name || customer.email)}</h2><div class="secret">${escapeHtml(link)}</div><p class="muted">Copy this link and send it to the customer securely.</p><a class="button secondary" href="/admin/customers/${escapeHtml(customer.id)}">Back to customer</a></div>`, "customers"));
   } catch (error) { next(error); }
 });
 
@@ -238,6 +260,7 @@ router.post("/licenses", async (req, res, next) => {
     const expiresRaw = String(req.body.expires_at ?? "").trim();
     const activationLimit = Math.max(1, Math.min(1000, Number.parseInt(String(req.body.activation_limit ?? "1"),10)||1));
     const licence = await prisma.license.create({ data: { keyHash, keyLastFour: rawKey.slice(-4), productId: product.id, customerId: customer.id, subscriptionId: subscription.id, activationLimit, expiresAt: expiresRaw ? new Date(`${expiresRaw}T23:59:59.000Z`) : null } });
+    await storeLicenceDelivery(licence.id, customer.id, rawKey);
     await writeAudit({ action: "license.created", entityType: "license", entityId: licence.id, summary: `Licence created for ${customer.name || customer.email}`, metadata: { subscriptionId: subscription.id, activationLimit } });
     const planName = subscription.plan?.name || "Custom";
     const subscriptionLabel = subscription.complimentary ? "Complimentary" : subscription.status.replaceAll("_", " ");
@@ -358,6 +381,7 @@ router.post("/licenses/:id/action", async (req, res, next) => {
     if (action === "regenerate") {
       const { rawKey, keyHash } = await uniqueLicenseKey(licence.product.slug);
       await prisma.license.update({ where: { id: licence.id }, data: { keyHash, keyLastFour: rawKey.slice(-4) } });
+      if (licence.customerId) await storeLicenceDelivery(licence.id, licence.customerId, rawKey);
       await writeAudit({ action: "license.regenerated", entityType: "license", entityId: licence.id, summary: `Licence key regenerated for ${licence.customer?.name || licence.customer?.email || "unassigned customer"}` });
       const body = `<div class="alert success"><strong>Replacement licence key created.</strong> The previous key is now invalid. Copy the new key now; it cannot be retrieved later.</div><div class="panel"><h2>${escapeHtml(licence.product.name)}</h2><div class="secret">${escapeHtml(rawKey)}</div><p class="muted">This is the only page that displays the full replacement key.</p><a class="button secondary" href="/admin/licenses/${escapeHtml(licence.id)}">Back to licence</a></div>`;
       return res.send(layout("Licence key regenerated", body, "licenses"));
