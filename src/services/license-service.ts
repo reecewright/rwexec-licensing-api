@@ -2,6 +2,7 @@ import { prisma } from "../db.js";
 import { hashLicenseKey } from "../utils/license-key.js";
 import { effectiveStatus } from "../utils/license-status.js";
 import { normalizeSiteUrl } from "../utils/site-url.js";
+import { subscriptionIsEntitled } from "../utils/subscription-status.js";
 
 type ClientInput = {
   licenseKey: string;
@@ -19,6 +20,7 @@ async function findLicense(licenseKey: string, productSlug: string) {
     },
     include: {
       product: true,
+      subscription: true,
       activations: {
         where: { deactivatedAt: null }
       }
@@ -37,6 +39,7 @@ export async function activateLicense(input: ClientInput) {
       },
       include: {
         product: true,
+        subscription: true,
         activations: {
           where: { deactivatedAt: null }
         }
@@ -50,6 +53,9 @@ export async function activateLicense(input: ClientInput) {
     const status = effectiveStatus(license);
     if (status !== "active") {
       return { ok: false as const, reason: status };
+    }
+    if (license.subscription && !subscriptionIsEntitled(license.subscription)) {
+      return { ok: false as const, reason: "subscription_inactive" as const };
     }
 
     const existing = await tx.activation.findUnique({
@@ -119,6 +125,9 @@ export async function validateLicense(input: ClientInput) {
   const status = effectiveStatus(license);
   if (status !== "active") {
     return { ok: false as const, reason: status };
+  }
+  if (license.subscription && !subscriptionIsEntitled(license.subscription)) {
+    return { ok: false as const, reason: "subscription_inactive" as const };
   }
 
   const activation = await prisma.activation.findUnique({

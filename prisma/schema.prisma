@@ -110,6 +110,7 @@ model Subscription {
   product                Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
   plan                   Plan?              @relation(fields: [planId], references: [id], onDelete: SetNull)
   usage                   UsageCounter[]
+  licenses                License[]
 
   @@index([customerId, status])
   @@index([productId, status])
@@ -138,15 +139,18 @@ model License {
   expiresAt       DateTime?
   productId       String
   customerId      String?
+  subscriptionId  String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
   product         Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
   customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  subscription    Subscription?  @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   activations     Activation[]
 
   @@index([productId])
   @@index([customerId])
+  @@index([subscriptionId])
   @@index([status])
 }
 
@@ -165,4 +169,29 @@ model Activation {
   @@unique([licenseId, instanceId])
   @@index([licenseId, deactivatedAt])
   @@index([siteUrl])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String?
+  summary    String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  type        String
+  payloadHash String?
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([provider, type])
 }

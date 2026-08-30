@@ -2,7 +2,7 @@
 
 Central commercial backend for RWExec products.
 
-Version **0.2.2** expands the original Reservations licensing API into a multi-product customer, plan, subscription, entitlement and licence service with a built-in RWExec Admin dashboard.
+Version **0.3.0** expands the original Reservations licensing API into a multi-product customer, plan, subscription, entitlement and licence service with a built-in RWExec Admin dashboard.
 
 ## Products
 
@@ -13,20 +13,18 @@ The seed currently registers:
 
 Additional RWExec products can be added through the admin dashboard or admin API.
 
-## What v0.2.2 adds
+## What v0.3.0 adds
 
-- Multi-product catalogue
-- Customers shared across RWExec products
-- Plans with price/billing metadata
-- Boolean and numeric-limit entitlements
-- Subscriptions, including complimentary/manual subscriptions
-- External billing IDs ready for a later Stripe webhook integration
-- Usage counters ready for limits such as Signage screen/device allowances
-- Internal RWExec Admin dashboard
-- Manual complimentary licence creation from the browser
-- Branded admin logo/favicon and improved form controls
-- Existing Reservations activate / validate / deactivate API retained
-- Existing admin API retained and expanded
+- Licence records are now linked directly to the subscription that granted them.
+- Licence activation/validation now checks that linked subscription entitlement is still active.
+- Subscription management: edit plan/period, complimentary flag, suspend, reactivate, cancel now, or cancel at period end.
+- Licence management: edit activation limit/expiry, suspend, revoke, reactivate, reset activations, and regenerate a replacement key.
+- Replacement licence keys invalidate the previous raw key immediately and are displayed only once.
+- Plan management: edit name, price, billing interval, active status, and entitlements.
+- Audit log for commercial/admin changes.
+- Webhook event persistence model ready for Stripe webhook idempotency.
+- Admin API endpoints for subscription lifecycle, licence lifecycle, activation reset, key regeneration, and licence creation from a subscription.
+- Existing customer management, RWExec branding, Reservations licensing endpoints, multi-product plans and Signage usage limits remain intact.
 
 ## RWExec Admin
 
@@ -44,6 +42,7 @@ The dashboard contains:
 - Plans and entitlements
 - Subscriptions
 - Licences
+- Audit log
 
 The Licences page can create permanent complimentary licences by leaving the expiry date blank.
 
@@ -75,13 +74,7 @@ Railway supplies `PORT` automatically.
 
 The production start path is `dist/src/server.js` because the TypeScript project includes both `src` and `prisma` under the project root.
 
-After deploying v0.2.2, run once in the Railway service shell:
-
-```bash
-npm run seed
-```
-
-This keeps RWExec Reservations and adds RWExec Signage to the product table.
+v0.3.0 includes a database migration and Railway should apply it automatically via the configured pre-deploy command. No new seed data is required when upgrading from v0.2.3. If Railway ever deploys without applying the migration, run `npm run prisma:migrate:deploy` once in the service shell.
 
 ## Public licence endpoints
 
@@ -124,8 +117,13 @@ Available resources now include:
 - `GET /v1/admin/customers`
 - `GET/POST /v1/admin/plans`
 - `GET/POST /v1/admin/subscriptions`
+- `PATCH /v1/admin/subscriptions/:id`
 - `GET/POST /v1/admin/licenses`
-- `GET /v1/admin/licenses/:id`
+- `POST /v1/admin/licenses/from-subscription`
+- `GET/PATCH /v1/admin/licenses/:id`
+- `POST /v1/admin/licenses/:id/reset-activations`
+- `POST /v1/admin/licenses/:id/regenerate`
+- `GET /v1/admin/audit`
 
 The raw full licence key is returned only at creation. The database stores only its HMAC hash and last four characters.
 
@@ -166,3 +164,16 @@ npm run dev
 - Added customer update endpoint to the admin API.
 - Manual subscriptions can capture a billing email.
 - Updated admin branding to use the transparent RWExec logo supplied for the dashboard.
+
+
+## v0.2.3
+
+- Licence creation now starts from an existing active, trial or complimentary customer subscription.
+- Customer, product, plan and subscription status are inherited automatically when a licence is generated.
+- Removed duplicate customer email/name entry from the admin licence form.
+- No database migration is required from v0.2.2.
+
+
+## v0.3.0
+
+This is the pre-Stripe commercial-control release. It establishes the lifecycle actions and subscription-to-licence relationship that Stripe webhooks will update later, without adding Stripe credentials or payment processing yet.

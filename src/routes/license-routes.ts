@@ -22,7 +22,7 @@ function errorStatus(reason: string): number {
   if (reason === "activation_limit_reached") return 409;
   if (reason === "site_mismatch") return 409;
   if (reason === "not_activated") return 403;
-  if (["expired", "suspended", "revoked"].includes(reason)) return 403;
+  if (["expired", "suspended", "revoked", "subscription_inactive"].includes(reason)) return 403;
   return 400;
 }
 

@@ -18,7 +18,8 @@ export function layout(title: string, body: string, active = "") {
     ["products", "Products", "/admin/products"],
     ["plans", "Plans", "/admin/plans"],
     ["subscriptions", "Subscriptions", "/admin/subscriptions"],
-    ["licenses", "Licences", "/admin/licenses"]
+    ["licenses", "Licences", "/admin/licenses"],
+    ["audit", "Audit", "/admin/audit"]
   ]
     .map(([key, label, href]) => `<a class="nav-link${active === key ? " active" : ""}" href="${href}">${label}</a>`)
     .join("");
