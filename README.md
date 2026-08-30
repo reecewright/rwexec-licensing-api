@@ -2,7 +2,7 @@
 
 Central commercial backend for RWExec products.
 
-Version **0.2.0** expands the original Reservations licensing API into a multi-product customer, plan, subscription, entitlement and licence service with a built-in RWExec Admin dashboard.
+Version **0.2.1** expands the original Reservations licensing API into a multi-product customer, plan, subscription, entitlement and licence service with a built-in RWExec Admin dashboard.
 
 ## Products
 
@@ -13,7 +13,7 @@ The seed currently registers:
 
 Additional RWExec products can be added through the admin dashboard or admin API.
 
-## What v0.2.0 adds
+## What v0.2.1 adds
 
 - Multi-product catalogue
 - Customers shared across RWExec products
@@ -24,6 +24,7 @@ Additional RWExec products can be added through the admin dashboard or admin API
 - Usage counters ready for limits such as Signage screen/device allowances
 - Internal RWExec Admin dashboard
 - Manual complimentary licence creation from the browser
+- Branded admin logo/favicon and improved form controls
 - Existing Reservations activate / validate / deactivate API retained
 - Existing admin API retained and expanded
 
@@ -74,7 +75,7 @@ Railway supplies `PORT` automatically.
 
 The production start path is `dist/src/server.js` because the TypeScript project includes both `src` and `prisma` under the project root.
 
-After deploying v0.2.0, run once in the Railway service shell:
+After deploying v0.2.1, run once in the Railway service shell:
 
 ```bash
 npm run seed

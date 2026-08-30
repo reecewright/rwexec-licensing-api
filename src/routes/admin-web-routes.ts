@@ -1,4 +1,5 @@
 import { Router } from "express";
+import path from "node:path";
 import { prisma } from "../db.js";
 import { clearAdminSession, createAdminSession, hasAdminSession, requireAdminSession, verifyAdminKey } from "../admin/session.js";
 import { adminCss } from "../admin/styles.js";
@@ -18,6 +19,14 @@ function date(value: Date | null | undefined) {
 
 router.get("/assets/admin.css", (_req, res) => {
   res.type("text/css").send(adminCss);
+});
+
+router.get("/assets/rwexec-logo.png", (_req, res) => {
+  res.sendFile(path.resolve(process.cwd(), "src/admin/assets/rwexec-logo.png"));
+});
+
+router.get("/assets/rwexec-favicon.png", (_req, res) => {
+  res.sendFile(path.resolve(process.cwd(), "src/admin/assets/rwexec-favicon.png"));
 });
 
 router.get("/login", (req, res) => {
@@ -126,7 +135,7 @@ router.get("/subscriptions", async (_req, res, next) => {
       prisma.product.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
       prisma.plan.findMany({ where: { active: true }, orderBy: { name: "asc" }, include: { product: true } })
     ]);
-    const body = `<div class="split"><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Product / plan</th><th>Status</th><th>Period end</th><th>Provider</th></tr></thead><tbody>${subscriptions.length ? subscriptions.map(s => `<tr><td>${escapeHtml(s.customer.name || s.customer.email)}<div class="muted">${escapeHtml(s.customer.email)}</div></td><td>${escapeHtml(s.product.name)}<div class="muted">${escapeHtml(s.plan?.name || "Custom")}</div></td><td><span class="status ${s.status.toLowerCase()}">${escapeHtml(s.status.replaceAll("_"," "))}</span></td><td>${date(s.currentPeriodEnd)}</td><td>${escapeHtml(s.complimentary ? "Complimentary" : s.externalProvider || "Manual")}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Add manual subscription</h2><form class="form-grid" action="/admin/subscriptions" method="post"><label>Customer email<input type="email" name="customer_email" required></label><label>Customer name<input name="customer_name"></label><label>Product<select name="product_id">${products.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}</select></label><label>Plan<select name="plan_id"><option value="">Custom / no plan</option>${plans.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.product.name)} — ${escapeHtml(p.name)}</option>`).join("")}</select></label><label><input type="checkbox" name="complimentary" value="1"> Complimentary / no billing</label><label>Current period end<input type="date" name="current_period_end"></label><button class="button primary" type="submit">Create subscription</button></form></section></div>`;
+    const body = `<div class="split"><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Product / plan</th><th>Status</th><th>Period end</th><th>Provider</th></tr></thead><tbody>${subscriptions.length ? subscriptions.map(s => `<tr><td>${escapeHtml(s.customer.name || s.customer.email)}<div class="muted">${escapeHtml(s.customer.email)}</div></td><td>${escapeHtml(s.product.name)}<div class="muted">${escapeHtml(s.plan?.name || "Custom")}</div></td><td><span class="status ${s.status.toLowerCase()}">${escapeHtml(s.status.replaceAll("_"," "))}</span></td><td>${date(s.currentPeriodEnd)}</td><td>${escapeHtml(s.complimentary ? "Complimentary" : s.externalProvider || "Manual")}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Add manual subscription</h2><form class="form-grid" action="/admin/subscriptions" method="post"><label>Customer email<input type="email" name="customer_email" required></label><label>Customer name<input name="customer_name"></label><label>Product<select name="product_id">${products.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("")}</select></label><label>Plan<select name="plan_id"><option value="">Custom / no plan</option>${plans.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.product.name)} — ${escapeHtml(p.name)}</option>`).join("")}</select></label><label class="checkbox-card"><input type="checkbox" name="complimentary" value="1"><span class="checkbox-copy"><span class="checkbox-title">Complimentary / no billing</span><span class="checkbox-help">No payment required. Leave the period end blank for a permanent complimentary subscription.</span></span></label><label>Current period end<input type="date" name="current_period_end"></label><button class="button primary" type="submit">Create subscription</button></form></section></div>`;
     res.send(layout("Subscriptions", body, "subscriptions"));
   } catch (error) { next(error); }
 });
