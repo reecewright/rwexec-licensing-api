@@ -31,7 +31,7 @@ export async function createPortalMagicLink(customerId: string) {
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + MAGIC_LINK_MINUTES * 60_000);
   await prisma.customerPortalToken.create({ data: { customerId, tokenHash, expiresAt } });
-  return `${config.PUBLIC_BASE_URL.replace(/\/$/, "")}/account/verify?token=${encodeURIComponent(token)}`;
+  return `${config.PUBLIC_BASE_URL.replace(/\/$/, "")}/verify?token=${encodeURIComponent(token)}`;
 }
 
 export async function consumePortalMagicLink(token: string) {
