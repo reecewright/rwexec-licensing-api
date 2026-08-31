@@ -11,7 +11,7 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(3).default("RWExec <licensing@rwexec.com>"),
-  PUBLIC_BASE_URL: z.url().default("https://licensing.rwexec.com")
+  PUBLIC_BASE_URL: z.url().default("https://account.rwexec.com")
 });
 
 const parsed = envSchema.safeParse(process.env);
