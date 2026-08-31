@@ -24,6 +24,14 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "rwexec-licensing-api" });
 });
 
+app.get("/", (req, res, next) => {
+  if (req.hostname === "account.rwexec.com") {
+    return res.redirect("/account");
+  }
+
+  next();
+});
+
 app.use("/account", rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false }), customerPortalRouter);
 
 app.use("/admin", rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }), adminWebRouter);
