@@ -381,7 +381,10 @@ router.post("/licenses/:id/action", async (req, res, next) => {
     if (action === "regenerate") {
       const { rawKey, keyHash } = await uniqueLicenseKey(licence.product.slug);
       await prisma.license.update({ where: { id: licence.id }, data: { keyHash, keyLastFour: rawKey.slice(-4) } });
-      if (licence.customerId) await storeLicenceDelivery(licence.id, licence.customerId, rawKey);
+      if (licence.customerId) {
+        await storeLicenceDelivery(licence.id, licence.customerId, rawKey);
+        await sendCustomerPortalEmail(licence.customerId, "licence");
+      }
       await writeAudit({ action: "license.regenerated", entityType: "license", entityId: licence.id, summary: `Licence key regenerated for ${licence.customer?.name || licence.customer?.email || "unassigned customer"}` });
       const body = `<div class="alert success"><strong>Replacement licence key created.</strong> The previous key is now invalid. Copy the new key now; it cannot be retrieved later.</div><div class="panel"><h2>${escapeHtml(licence.product.name)}</h2><div class="secret">${escapeHtml(rawKey)}</div><p class="muted">This is the only page that displays the full replacement key.</p><a class="button secondary" href="/admin/licenses/${escapeHtml(licence.id)}">Back to licence</a></div>`;
       return res.send(layout("Licence key regenerated", body, "licenses"));
