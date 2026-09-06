@@ -57,10 +57,18 @@ app.use((req, res, next) => {
     );
   }
 
-  next();
+  return next();
 });
 
-app.use("/admin", adminWebLimiter, adminWebRouter);
+app.use("/admin", (req, res, next) => {
+  if (req.hostname === "admin.rwexec.com") {
+    return next();
+  }
+
+  return adminWebLimiter(req, res, () =>
+    adminWebRouter(req, res, next),
+  );
+});
 
 app.use("/v1/licenses", rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }), licenseRouter);
 
