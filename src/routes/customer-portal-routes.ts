@@ -73,28 +73,88 @@ customerPortalRouter.get("/assets/rwexec-favicon.png", (_req, res) => {
 customerPortalRouter.get("/checkout-success", async (req, res, next) => {
   try {
     const sessionId = String(req.query.session_id || "");
+
     if (!sessionId) {
-      return res.status(400).send(shell(req, "Checkout", `<section class="panel portal-login"><h1>Missing checkout session</h1><p class="muted">We could not verify this checkout.</p></section>`));
+      return res.status(400).send(
+        shell(
+          req,
+          "Checkout",
+          `<section class="panel portal-login">
+            <h1>Missing checkout session</h1>
+            <p class="muted">We could not verify this checkout.</p>
+          </section>`,
+        ),
+      );
     }
 
     const session = await retrieveCheckoutSession(sessionId);
-    const complete = session.status === "complete" || session.payment_status === "paid" || session.payment_status === "no_payment_required";
+
+    const complete =
+      session.status === "complete" ||
+      session.payment_status === "paid" ||
+      session.payment_status === "no_payment_required";
+
     if (!complete) {
-      return res.status(409).send(shell(req, "Checkout pending", `<section class="panel portal-login"><h1>Payment is still processing</h1><p class="muted">Please wait a moment and refresh this page.</p></section>`));
+      res.send(
+  shell(
+    req,
+    "Subscription active",
+    `<section class="panel portal-login">
+      <img
+        class="portal-logo"
+        src="${portalPath(req, "/assets/rwexec-logo.png")}"
+        alt="RWExec"
+      >
+
+      <h1>Subscription confirmed</h1>
+
+      <div class="alert success">
+        Your payment was successful and RWExec is setting up your account.
+      </div>
+
+      <p>
+        We’ve emailed you a secure link to access your customer account and collect your licence.
+      </p>
+
+      <a class="button primary" href="${portalPath(req)}">
+        Open customer account
+      </a>
+    </section>`,
+  ),
+);
     }
 
-    const email = typeof session.customer_details?.email === "string"
-      ? session.customer_details.email.toLowerCase()
-      : typeof session.customer_email === "string"
-        ? session.customer_email.toLowerCase()
-        : "";
+    return res.send(
+      shell(
+        req,
+        "Subscription active",
+        `<section class="panel portal-login">
+          <img
+            class="portal-logo"
+            src="${portalPath(req, "/assets/rwexec-logo.png")}"
+            alt="RWExec"
+          >
 
-    const customer = email ? await prisma.customer.findUnique({ where: { email } }) : null;
-    const emailed = customer && customerEmailConfigured()
-      ? await sendCustomerPortalEmail(customer.id, "welcome").then(() => true).catch(() => false)
-      : false;
+          <h1>Subscription confirmed</h1>
 
-    res.send(shell(req, "Subscription active", `<section class="panel portal-login"><img class="portal-logo" src="${portalPath(req, "/assets/rwexec-logo.png")}" alt="RWExec"><h1>Subscription confirmed</h1><div class="alert success">Your payment was successful and RWExec is setting up your account.</div><p>${emailed ? "We’ve emailed you a secure sign-in link so you can collect your licence." : "You can access your customer account to view your subscription and collect your licence once delivery is available."}</p><a class="button primary" href="${portalPath(req)}">Open customer account</a></section>`));
+          <div class="alert success">
+            Your payment was successful and RWExec is setting up your account.
+          </div>
+
+          <p>
+            We’ve emailed you a secure link to access your customer account
+            and collect your licence.
+          </p>
+
+          <a
+            class="button primary"
+            href="${portalPath(req)}"
+          >
+            Open customer account
+          </a>
+        </section>`,
+      ),
+    );
   } catch (error) {
     next(error);
   }

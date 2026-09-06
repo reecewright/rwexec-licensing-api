@@ -7,7 +7,11 @@ export function customerEmailConfigured() {
   return Boolean(config.RESEND_API_KEY);
 }
 
-async function sendEmail(to: string, subject: string, html: string) {
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+) {
   if (!config.RESEND_API_KEY) {
     return {
       sent: false,
@@ -15,19 +19,22 @@ async function sendEmail(to: string, subject: string, html: string) {
     };
   }
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    "https://api.resend.com/emails",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: config.EMAIL_FROM,
+        to: [to],
+        subject,
+        html,
+      }),
     },
-    body: JSON.stringify({
-      from: config.EMAIL_FROM,
-      to: [to],
-      subject,
-      html,
-    }),
-  });
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -48,7 +55,27 @@ function emailTemplate(input: {
 }) {
   return `
 <!doctype html>
-<html>
+<html
+  xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:v="urn:schemas-microsoft-com:vml"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+
+    <!--[if mso]>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+    <![endif]-->
+  </head>
+
   <body
     style="
       margin:0;
@@ -64,10 +91,18 @@ function emailTemplate(input: {
       cellspacing="0"
       cellpadding="0"
       border="0"
-      style="background:#f3f5f8;padding:32px 16px;"
+      style="
+        width:100%;
+        background:#f3f5f8;
+      "
     >
       <tr>
-        <td align="center">
+        <td
+          align="center"
+          style="
+            padding:32px 16px;
+          "
+        >
 
           <table
             role="presentation"
@@ -76,55 +111,54 @@ function emailTemplate(input: {
             cellpadding="0"
             border="0"
             style="
+              width:100%;
               max-width:620px;
               background:#ffffff;
               border:1px solid #e2e8f0;
-              border-radius:14px;
+              border-radius:12px;
               overflow:hidden;
             "
           >
+
+            <!-- HEADER -->
             <tr>
               <td
                 style="
                   background:#111827;
-                  padding:24px 28px;
-                  text-align:left;
+                  padding:28px 30px;
                 "
               >
-                <div
-                  <img
-  src="https://account.rwexec.com/assets/rwexec-logo.png"
-  alt="RWExec"
-  width="150"
-  style="
-    display:block;
-    width:150px;
-    max-width:100%;
-    height:auto;
-    border:0;
-  "
-/>
-
-<div
-  style="
-    margin-top:8px;
-    font-size:12px;
-    color:#cbd5e1;
-    letter-spacing:0.4px;
-  "
->
-  Software Solutions
-</div>
+                <img
+                  src="https://account.rwexec.com/assets/rwexec-logo.png"
+                  alt="RWExec Software Solutions"
+                  width="220"
+                  style="
+                    display:block;
+                    width:220px;
+                    max-width:100%;
+                    height:auto;
+                    border:0;
+                    outline:none;
+                    text-decoration:none;
+                  "
+                />
               </td>
             </tr>
 
+            <!-- HEADING -->
             <tr>
-              <td style="padding:34px 28px 10px 28px;">
+              <td
+                style="
+                  padding:36px 30px 10px 30px;
+                "
+              >
                 <h1
                   style="
                     margin:0;
+                    padding:0;
                     font-size:26px;
-                    line-height:1.25;
+                    line-height:1.3;
+                    font-weight:700;
                     color:#172033;
                   "
                 >
@@ -133,10 +167,11 @@ function emailTemplate(input: {
               </td>
             </tr>
 
+            <!-- INTRO -->
             <tr>
               <td
                 style="
-                  padding:10px 28px 6px 28px;
+                  padding:10px 30px 4px 30px;
                   font-size:16px;
                   line-height:1.6;
                   color:#334155;
@@ -146,62 +181,87 @@ function emailTemplate(input: {
               </td>
             </tr>
 
-            <tr>
-              <td style="padding:24px 28px 30px 28px;">
-                <table
-                  role="presentation"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                >
-                  <tr>
-                    <td
-  bgcolor="#ff6a00"
-  style="
-    background:#ff6a00;
-    border-radius:6px;
-    padding:12px 18px;
-  "
->
-  <a
-    href="${input.link}"
-    style="
-      display:inline-block;
-      color:#ffffff;
-      text-decoration:none;
-      font-size:15px;
-      font-weight:700;
-      line-height:1;
-    "
-  >
-    ${input.buttonText}
-  </a>
-</td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
+            <!-- BUTTON -->
             <tr>
               <td
                 style="
-                  padding:0 28px 28px 28px;
-                  font-size:13px;
-                  line-height:1.5;
-                  color:#64748b;
+                  padding:26px 30px 32px 30px;
                 "
               >
-                This secure link expires in 30 minutes and can only be used once.
+
+                <!--[if mso]>
+                <v:roundrect
+                  xmlns:v="urn:schemas-microsoft-com:vml"
+                  xmlns:w="urn:schemas-microsoft-com:office:word"
+                  href="${input.link}"
+                  style="
+                    height:46px;
+                    v-text-anchor:middle;
+                    width:180px;
+                  "
+                  arcsize="12%"
+                  stroke="f"
+                  fillcolor="#ff6a00"
+                >
+                  <w:anchorlock/>
+                  <center
+                    style="
+                      color:#ffffff;
+                      font-family:Arial,sans-serif;
+                      font-size:15px;
+                      font-weight:bold;
+                    "
+                  >
+                    ${input.buttonText}
+                  </center>
+                </v:roundrect>
+                <![endif]-->
+
+                <!--[if !mso]><!-->
+                <a
+                  href="${input.link}"
+                  style="
+                    display:inline-block;
+                    background:#ff6a00;
+                    color:#111111;
+                    text-decoration:none;
+                    font-size:15px;
+                    line-height:20px;
+                    font-weight:700;
+                    padding:13px 20px;
+                    border-radius:6px;
+                  "
+                >
+                  ${input.buttonText}
+                </a>
+                <!--<![endif]-->
+
               </td>
             </tr>
 
+            <!-- SECURITY NOTE -->
+            <tr>
+              <td
+                style="
+                  padding:0 30px 30px 30px;
+                  font-size:13px;
+                  line-height:1.6;
+                  color:#64748b;
+                "
+              >
+                This secure link expires in 30 minutes
+                and can only be used once.
+              </td>
+            </tr>
+
+            <!-- FOOTER -->
             <tr>
               <td
                 style="
                   border-top:1px solid #e2e8f0;
-                  padding:18px 28px;
+                  padding:20px 30px;
                   font-size:12px;
-                  line-height:1.5;
+                  line-height:1.6;
                   color:#94a3b8;
                 "
               >
@@ -210,6 +270,7 @@ function emailTemplate(input: {
                 Automated account notification
               </td>
             </tr>
+
           </table>
 
         </td>
@@ -241,7 +302,9 @@ export async function sendCustomerPortalEmail(
     };
   }
 
-  const link = await createPortalMagicLink(customer.id);
+  const link = await createPortalMagicLink(
+    customer.id,
+  );
 
   let subject: string;
   let heading: string;
@@ -250,28 +313,49 @@ export async function sendCustomerPortalEmail(
 
   switch (reason) {
     case "licence":
-      subject = "Your RWExec licence is ready";
-      heading = "Your licence is ready";
+      subject =
+        "Your RWExec licence is ready";
+
+      heading =
+        "Your licence is ready";
+
       intro =
         "Your RWExec subscription is active and your licence is ready to collect from your customer account.";
-      buttonText = "Collect licence";
+
+      buttonText =
+        "Collect licence";
+
       break;
 
     case "welcome":
-      subject = "Welcome to RWExec";
-      heading = "Welcome to RWExec";
+      subject =
+        "Welcome to RWExec";
+
+      heading =
+        "Welcome to RWExec";
+
       intro =
         "Your RWExec customer account is ready. Use the secure link below to open your account and manage your software.";
-      buttonText = "Open my account";
+
+      buttonText =
+        "Open my account";
+
       break;
 
     case "login":
     default:
-      subject = "Your RWExec account sign-in link";
-      heading = "Sign in to your account";
+      subject =
+        "Your RWExec account sign-in link";
+
+      heading =
+        "Sign in to your account";
+
       intro =
         "Use the secure link below to sign in to your RWExec customer account.";
-      buttonText = "Sign in securely";
+
+      buttonText =
+        "Sign in securely";
+
       break;
   }
 
@@ -282,13 +366,19 @@ export async function sendCustomerPortalEmail(
     link,
   });
 
-  const result = await sendEmail(customer.email, subject, html);
+  const result = await sendEmail(
+    customer.email,
+    subject,
+    html,
+  );
 
   await writeAudit({
-    action: `customer.portal_email_${reason}`,
+    action:
+      `customer.portal_email_${reason}`,
     entityType: "customer",
     entityId: customer.id,
-    summary: `Customer portal email sent to ${customer.email}`,
+    summary:
+      `Customer portal email sent to ${customer.email}`,
   });
 
   return result;
