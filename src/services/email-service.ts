@@ -223,7 +223,7 @@ function emailTemplate(input: {
                   style="
                     display:inline-block;
                     background:#ff6a00;
-                    color:#111111;
+                    color: black;
                     text-decoration:none;
                     font-size:15px;
                     line-height:20px;
@@ -323,7 +323,7 @@ export async function sendCustomerPortalEmail(
         "Your RWExec subscription is active and your licence is ready to collect from your customer account.";
 
       buttonText =
-        "Collect licence";
+        "Collect Licence";
 
       break;
 
