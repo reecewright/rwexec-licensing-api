@@ -76,6 +76,21 @@ export async function retrieveCheckoutSession(sessionId: string) {
   return stripeRequest(`/checkout/sessions/${encodeURIComponent(sessionId)}`);
 }
 
+export async function createBillingPortalSession(input: {
+  customerId: string;
+  returnUrl: string;
+}) {
+  const params = new URLSearchParams();
+  params.set("customer", input.customerId);
+  params.set("return_url", input.returnUrl);
+
+  return stripeRequest("/billing_portal/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString()
+  });
+}
+
 export function verifyStripeSignature(rawBody: Buffer, signatureHeader: string | undefined) {
   if (!signatureHeader) return false;
 
