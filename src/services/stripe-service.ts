@@ -5,7 +5,10 @@ import { config } from "../config.js";
 import { generateLicenseKey, hashLicenseKey } from "../utils/license-key.js";
 import { writeAudit } from "./audit-service.js";
 import { storeLicenceDelivery } from "./customer-portal-service.js";
-import { customerEmailConfigured, sendCustomerPortalEmail } from "./email-service.js";
+import {
+  customerEmailConfigured,
+  sendCustomerPortalEmail,
+} from "./email-service.js";
 
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const WEBHOOK_TOLERANCE_SECONDS = 300;
@@ -14,26 +17,38 @@ type StripeObject = Record<string, any>;
 
 function asId(value: unknown): string | null {
   if (typeof value === "string") return value;
-  if (value && typeof value === "object" && "id" in value && typeof (value as any).id === "string") return (value as any).id;
+  if (
+    value &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof (value as any).id === "string"
+  )
+    return (value as any).id;
   return null;
 }
 
 function asDateFromUnix(value: unknown): Date | null {
-  return typeof value === "number" && Number.isFinite(value) ? new Date(value * 1000) : null;
+  return typeof value === "number" && Number.isFinite(value)
+    ? new Date(value * 1000)
+    : null;
 }
 
-async function stripeRequest(path: string, init?: RequestInit): Promise<StripeObject> {
+async function stripeRequest(
+  path: string,
+  init?: RequestInit,
+): Promise<StripeObject> {
   const response = await fetch(`${STRIPE_API_BASE}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${config.STRIPE_SECRET_KEY}`,
-      ...(init?.headers ?? {})
-    }
+      ...(init?.headers ?? {}),
+    },
   });
 
   const data = (await response.json()) as StripeObject;
   if (!response.ok) {
-    const message = data?.error?.message || `Stripe request failed (${response.status})`;
+    const message =
+      data?.error?.message || `Stripe request failed (${response.status})`;
     throw new Error(message);
   }
   return data;
@@ -46,9 +61,14 @@ export async function createCheckoutSession(input: {
   successUrl: string;
   cancelUrl: string;
 }) {
-  const plan = await prisma.plan.findUnique({ where: { id: input.planId }, include: { product: true } });
-  if (!plan || !plan.active || !plan.product.active) throw new Error("Plan is not available.");
-  if (!plan.stripePriceId) throw new Error("Plan does not have a Stripe Price ID.");
+  const plan = await prisma.plan.findUnique({
+    where: { id: input.planId },
+    include: { product: true },
+  });
+  if (!plan || !plan.active || !plan.product.active)
+    throw new Error("Plan is not available.");
+  if (!plan.stripePriceId)
+    throw new Error("Plan does not have a Stripe Price ID.");
 
   const params = new URLSearchParams();
   params.set("mode", "subscription");
@@ -60,17 +80,20 @@ export async function createCheckoutSession(input: {
   params.set("billing_address_collection", "auto");
   params.set("metadata[rwexec_plan_id]", plan.id);
   params.set("subscription_data[metadata][rwexec_plan_id]", plan.id);
-  params.set("subscription_data[metadata][rwexec_product_slug]", plan.product.slug);
+  params.set(
+    "subscription_data[metadata][rwexec_product_slug]",
+    plan.product.slug,
+  );
   if (input.customerEmail) params.set("customer_email", input.customerEmail);
-  if (input.customerName) params.set("metadata[rwexec_customer_name]", input.customerName);
+  if (input.customerName)
+    params.set("metadata[rwexec_customer_name]", input.customerName);
 
   return stripeRequest("/checkout/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString()
+    body: params.toString(),
   });
 }
-
 
 export async function retrieveCheckoutSession(sessionId: string) {
   return stripeRequest(`/checkout/sessions/${encodeURIComponent(sessionId)}`);
@@ -87,42 +110,66 @@ export async function createBillingPortalSession(input: {
   return stripeRequest("/billing_portal/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString()
+    body: params.toString(),
   });
 }
 
-export function verifyStripeSignature(rawBody: Buffer, signatureHeader: string | undefined) {
+export function verifyStripeSignature(
+  rawBody: Buffer,
+  signatureHeader: string | undefined,
+) {
   if (!signatureHeader) return false;
 
   const parts = signatureHeader.split(",").map((part) => part.trim());
   const timestampPart = parts.find((part) => part.startsWith("t="));
-  const signatures = parts.filter((part) => part.startsWith("v1=")).map((part) => part.slice(3));
+  const signatures = parts
+    .filter((part) => part.startsWith("v1="))
+    .map((part) => part.slice(3));
   if (!timestampPart || signatures.length === 0) return false;
 
   const timestamp = Number(timestampPart.slice(2));
   if (!Number.isFinite(timestamp)) return false;
-  if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > WEBHOOK_TOLERANCE_SECONDS) return false;
+  if (
+    Math.abs(Math.floor(Date.now() / 1000) - timestamp) >
+    WEBHOOK_TOLERANCE_SECONDS
+  )
+    return false;
 
   const payload = `${timestamp}.${rawBody.toString("utf8")}`;
-  const expected = crypto.createHmac("sha256", config.STRIPE_WEBHOOK_SECRET).update(payload).digest("hex");
+  const expected = crypto
+    .createHmac("sha256", config.STRIPE_WEBHOOK_SECRET)
+    .update(payload)
+    .digest("hex");
 
   return signatures.some((signature) => {
     if (signature.length !== expected.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expected, "hex"));
+    return crypto.timingSafeEqual(
+      Buffer.from(signature, "hex"),
+      Buffer.from(expected, "hex"),
+    );
   });
 }
 
-function mapStripeSubscriptionStatus(status: string | undefined): SubscriptionStatus {
+function mapStripeSubscriptionStatus(
+  status: string | undefined,
+): SubscriptionStatus {
   switch (status) {
-    case "active": return "ACTIVE";
-    case "trialing": return "TRIALING";
+    case "active":
+      return "ACTIVE";
+    case "trialing":
+      return "TRIALING";
     case "past_due":
     case "unpaid":
-    case "incomplete": return "PAST_DUE";
-    case "incomplete_expired": return "EXPIRED";
-    case "paused": return "SUSPENDED";
-    case "canceled": return "CANCELED";
-    default: return "PAST_DUE";
+    case "incomplete":
+      return "PAST_DUE";
+    case "incomplete_expired":
+      return "EXPIRED";
+    case "paused":
+      return "SUSPENDED";
+    case "canceled":
+      return "CANCELED";
+    default:
+      return "PAST_DUE";
   }
 }
 
@@ -131,9 +178,11 @@ function stripePriceId(subscription: StripeObject): string | null {
 }
 
 function stripeCurrentPeriodEnd(subscription: StripeObject): Date | null {
-  return asDateFromUnix(subscription.current_period_end)
-    ?? asDateFromUnix(subscription?.items?.data?.[0]?.current_period_end)
-    ?? null;
+  return (
+    asDateFromUnix(subscription.current_period_end) ??
+    asDateFromUnix(subscription?.items?.data?.[0]?.current_period_end) ??
+    null
+  );
 }
 
 async function loadStripeCustomer(customerId: string): Promise<StripeObject> {
@@ -143,26 +192,35 @@ async function loadStripeCustomer(customerId: string): Promise<StripeObject> {
 async function ensureCustomer(customerId: string, fallback?: StripeObject) {
   const existingSubscription = await prisma.subscription.findFirst({
     where: { externalProvider: "stripe", externalCustomerId: customerId },
-    include: { customer: true }
+    include: { customer: true },
   });
   if (existingSubscription) return existingSubscription.customer;
 
-  const stripeCustomer = fallback?.email ? fallback : await loadStripeCustomer(customerId);
-  const email = typeof stripeCustomer.email === "string" ? stripeCustomer.email.trim().toLowerCase() : "";
-  if (!email) throw new Error(`Stripe customer ${customerId} has no email address.`);
-  const name = typeof stripeCustomer.name === "string" && stripeCustomer.name.trim() ? stripeCustomer.name.trim() : null;
+  const stripeCustomer = fallback?.email
+    ? fallback
+    : await loadStripeCustomer(customerId);
+  const email =
+    typeof stripeCustomer.email === "string"
+      ? stripeCustomer.email.trim().toLowerCase()
+      : "";
+  if (!email)
+    throw new Error(`Stripe customer ${customerId} has no email address.`);
+  const name =
+    typeof stripeCustomer.name === "string" && stripeCustomer.name.trim()
+      ? stripeCustomer.name.trim()
+      : null;
 
   return prisma.customer.upsert({
     where: { email },
     update: { name: name ?? undefined },
-    create: { email, name }
+    create: { email, name },
   });
 }
 
 async function ensureSubscriptionLicence(subscriptionId: string) {
   const subscription = await prisma.subscription.findUnique({
     where: { id: subscriptionId },
-    include: { product: true, licenses: true, customer: true }
+    include: { product: true, licenses: true, customer: true },
   });
   if (!subscription || subscription.licenses.length > 0) return null;
   if (!["ACTIVE", "TRIALING"].includes(subscription.status)) return null;
@@ -177,7 +235,8 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
     rawKey = "";
     keyHash = "";
   }
-  if (!rawKey || !keyHash) throw new Error("Could not generate a unique licence key.");
+  if (!rawKey || !keyHash)
+    throw new Error("Could not generate a unique licence key.");
 
   const licence = await prisma.license.create({
     data: {
@@ -186,8 +245,8 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
       productId: subscription.productId,
       customerId: subscription.customerId,
       subscriptionId: subscription.id,
-      activationLimit: 1
-    }
+      activationLimit: 1,
+    },
   });
 
   await storeLicenceDelivery(licence.id, subscription.customerId, rawKey);
@@ -197,7 +256,11 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
     entityType: "license",
     entityId: licence.id,
     summary: `Licence automatically created for Stripe subscription (${subscription.customer.email})`,
-    metadata: { subscriptionId: subscription.id, keyLastFour: licence.keyLastFour, deliveryPrepared: true }
+    metadata: {
+      subscriptionId: subscription.id,
+      keyLastFour: licence.keyLastFour,
+      deliveryPrepared: true,
+    },
   });
 
   if (customerEmailConfigured()) {
@@ -205,7 +268,12 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
       await sendCustomerPortalEmail(subscription.customerId, "licence");
     } catch (error) {
       console.error("Could not send automatic licence delivery email:", error);
-      await writeAudit({ action: "license.delivery_email_failed", entityType: "license", entityId: licence.id, summary: `Automatic licence delivery email failed for ${subscription.customer.email}` });
+      await writeAudit({
+        action: "license.delivery_email_failed",
+        entityType: "license",
+        entityId: licence.id,
+        summary: `Automatic licence delivery email failed for ${subscription.customer.email}`,
+      });
     }
   }
 
@@ -217,16 +285,21 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
   const externalCustomerId = asId(subscriptionObject.customer);
   const priceId = stripePriceId(subscriptionObject);
   if (!externalSubscriptionId || !externalCustomerId || !priceId) {
-    throw new Error("Stripe subscription payload is missing subscription, customer or price information.");
+    throw new Error(
+      "Stripe subscription payload is missing subscription, customer or price information.",
+    );
   }
 
-  const plan = await prisma.plan.findUnique({ where: { stripePriceId: priceId }, include: { product: true } });
+  const plan = await prisma.plan.findUnique({
+    where: { stripePriceId: priceId },
+    include: { product: true },
+  });
   if (!plan) {
     await writeAudit({
       action: "stripe.subscription_ignored",
       entityType: "stripe_subscription",
       entityId: externalSubscriptionId,
-      summary: `Stripe subscription ignored because price ${priceId} is not mapped to an RWExec plan.`
+      summary: `Stripe subscription ignored because price ${priceId} is not mapped to an RWExec plan.`,
     });
     return null;
   }
@@ -247,7 +320,7 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
       externalProvider: "stripe",
       externalCustomerId,
       currentPeriodEnd,
-      cancelAtPeriodEnd
+      cancelAtPeriodEnd,
     },
     create: {
       customerId: customer.id,
@@ -259,8 +332,8 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
       externalCustomerId,
       externalSubscriptionId,
       currentPeriodEnd,
-      cancelAtPeriodEnd
-    }
+      cancelAtPeriodEnd,
+    },
   });
 
   await ensureSubscriptionLicence(subscription.id);
@@ -268,15 +341,23 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
 }
 
 export async function fetchAndSyncStripeSubscription(subscriptionId: string) {
-  const object = await stripeRequest(`/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  const object = await stripeRequest(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
   return syncStripeSubscription(object);
 }
 
 function subscriptionIdFromInvoice(invoice: StripeObject): string | null {
-  return asId(invoice.subscription)
-    ?? asId(invoice?.parent?.subscription_details?.subscription)
-    ?? asId(invoice?.lines?.data?.find?.((line: StripeObject) => line?.parent?.subscription_item_details)?.parent?.subscription_item_details?.subscription)
-    ?? null;
+  return (
+    asId(invoice.subscription) ??
+    asId(invoice?.parent?.subscription_details?.subscription) ??
+    asId(
+      invoice?.lines?.data?.find?.(
+        (line: StripeObject) => line?.parent?.subscription_item_details,
+      )?.parent?.subscription_item_details?.subscription,
+    ) ??
+    null
+  );
 }
 
 export async function processStripeEvent(event: StripeObject) {
@@ -286,21 +367,38 @@ export async function processStripeEvent(event: StripeObject) {
 
   switch (type) {
     case "checkout.session.completed": {
-      if (object.mode !== "subscription") return { processed: false, reason: "not_subscription_checkout" };
+      if (object.mode !== "subscription")
+        return { processed: false, reason: "not_subscription_checkout" };
       const subscriptionId = asId(object.subscription);
-      if (!subscriptionId) return { processed: false, reason: "missing_subscription" };
+      if (!subscriptionId)
+        return { processed: false, reason: "missing_subscription" };
       await fetchAndSyncStripeSubscription(subscriptionId);
       return { processed: true };
     }
     case "customer.subscription.created":
-    case "customer.subscription.updated":
+    case "customer.subscription.updated": {
+      const subscriptionId = asId(object.id);
+
+      if (!subscriptionId) {
+        return {
+          processed: false,
+          reason: "missing_subscription",
+        };
+      }
+
+      await fetchAndSyncStripeSubscription(subscriptionId);
+
+      return { processed: true };
+    }
+
     case "customer.subscription.deleted":
       await syncStripeSubscription(object);
       return { processed: true };
     case "invoice.paid":
     case "invoice.payment_failed": {
       const subscriptionId = subscriptionIdFromInvoice(object);
-      if (!subscriptionId) return { processed: false, reason: "missing_subscription" };
+      if (!subscriptionId)
+        return { processed: false, reason: "missing_subscription" };
       await fetchAndSyncStripeSubscription(subscriptionId);
       return { processed: true };
     }
