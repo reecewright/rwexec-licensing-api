@@ -43,7 +43,24 @@ app.use((req, res, next) => {
 
 app.use("/account", customerPortalLimiter, customerPortalRouter);
 
-app.use("/admin", rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }), adminWebRouter);
+const adminWebLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+
+app.use((req, res, next) => {
+  if (req.hostname === "admin.rwexec.com") {
+    return adminWebLimiter(req, res, () =>
+      adminWebRouter(req, res, next),
+    );
+  }
+
+  next();
+});
+
+app.use("/admin", adminWebLimiter, adminWebRouter);
 
 app.use("/v1/licenses", rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }), licenseRouter);
 
