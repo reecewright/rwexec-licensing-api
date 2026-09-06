@@ -307,7 +307,9 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
   const customer = await ensureCustomer(externalCustomerId);
   const status = mapStripeSubscriptionStatus(subscriptionObject.status);
   const currentPeriodEnd = stripeCurrentPeriodEnd(subscriptionObject);
-  const cancelAtPeriodEnd = Boolean(subscriptionObject.cancel_at_period_end);
+  const cancelAtPeriodEnd =
+  Boolean(subscriptionObject.cancel_at_period_end) ||
+  asDateFromUnix(subscriptionObject.cancel_at) !== null;
 
   const subscription = await prisma.subscription.upsert({
     where: { externalSubscriptionId },
