@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import path from "node:path";
 import { prisma } from "../db.js";
 import { clearAdminSession, createAdminSession, hasAdminSession, requireAdminSession, verifyAdminKey } from "../admin/session.js";
@@ -10,6 +10,84 @@ import { createPortalMagicLink, storeLicenceDelivery } from "../services/custome
 import { customerEmailConfigured, sendCustomerPortalEmail } from "../services/email-service.js";
 
 const router = Router();
+
+const ADMIN_HOST = "admin.rwexec.com";
+
+function isCleanAdminHost(req: Request) {
+  return req.hostname === ADMIN_HOST;
+}
+
+function cleanAdminHtml(html: string) {
+  return html
+    .replaceAll('"/admin/', '"/')
+    .replaceAll("'/admin/", "'/")
+    .replaceAll('"/admin"', '"/"')
+    .replaceAll("'/admin'", "'/'");
+}
+
+function cleanAdminRedirect(target: string) {
+  if (target === "/admin") return "/";
+  if (target.startsWith("/admin/")) return target.slice("/admin".length);
+  return target;
+}
+
+function normaliseAdminCookiePath(req: Request, res: Response) {
+  if (!isCleanAdminHost(req)) return;
+
+  const setCookie = res.getHeader("set-cookie");
+  if (!setCookie) return;
+
+  const rewrite = (value: string) =>
+    value.replace(/Path=\/admin(?=;|$)/gi, "Path=/");
+
+  if (Array.isArray(setCookie)) {
+    res.setHeader("set-cookie", setCookie.map(value => rewrite(String(value))));
+    return;
+  }
+
+  res.setHeader("set-cookie", rewrite(String(setCookie)));
+}
+
+// Keep the existing router compatible with both:
+// - https://admin.rwexec.com/...
+// - https://licensing.rwexec.com/admin/...
+//
+// Existing HTML helpers and route bodies still contain /admin links.
+// On the dedicated admin hostname, rewrite outgoing HTML and redirects
+// so the browser stays on the clean root-based URL structure.
+router.use((req, res, next) => {
+  if (!isCleanAdminHost(req)) {
+    next();
+    return;
+  }
+
+  const originalSend = res.send.bind(res);
+  const originalRedirect = res.redirect.bind(res);
+
+  res.send = ((body: unknown) => {
+    if (typeof body === "string") {
+      return originalSend(cleanAdminHtml(body));
+    }
+
+    return originalSend(body);
+  }) as typeof res.send;
+
+  res.redirect = ((
+    statusOrPath: number | string,
+    maybePath?: string,
+  ) => {
+    if (typeof statusOrPath === "number") {
+      return originalRedirect(
+        statusOrPath,
+        cleanAdminRedirect(maybePath ?? "/"),
+      );
+    }
+
+    return originalRedirect(cleanAdminRedirect(statusOrPath));
+  }) as typeof res.redirect;
+
+  next();
+});
 
 function money(minor: number | null, currency: string) {
   if (minor === null) return "—";
@@ -57,11 +135,13 @@ router.post("/login", (req, res) => {
     return;
   }
   createAdminSession(res);
+  normaliseAdminCookiePath(req, res);
   res.redirect("/admin");
 });
 
 router.post("/logout", (req, res) => {
   clearAdminSession(res);
+  normaliseAdminCookiePath(req, res);
   res.redirect("/admin/login");
 });
 
