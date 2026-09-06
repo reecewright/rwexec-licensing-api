@@ -6,6 +6,7 @@ import { adminWebRouter } from "./routes/admin-web-routes.js";
 import { licenseRouter } from "./routes/license-routes.js";
 import { stripeWebhookRouter } from "./routes/stripe-routes.js";
 import { customerPortalRouter } from "./routes/customer-portal-routes.js";
+import { checkoutRouter } from "./routes/checkout-routes.js";
 
 export const app = express();
 
@@ -69,6 +70,17 @@ app.use("/admin", (req, res, next) => {
     adminWebRouter(req, res, next),
   );
 });
+
+app.use(
+  "/checkout",
+  rateLimit({
+    windowMs: 60_000,
+    limit: 30,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  }),
+  checkoutRouter,
+);
 
 app.use("/v1/licenses", rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }), licenseRouter);
 
