@@ -92,27 +92,29 @@ function emailTemplate(input: {
                 "
               >
                 <div
-                  style="
-                    font-size:22px;
-                    line-height:1;
-                    font-weight:800;
-                    letter-spacing:0.5px;
-                    color:#ffffff;
-                  "
-                >
-                  RW<span style="color:#ff6a00;">EXEC</span>
-                </div>
+                  <img
+  src="https://account.rwexec.com/assets/rwexec-logo.png"
+  alt="RWExec"
+  width="150"
+  style="
+    display:block;
+    width:150px;
+    max-width:100%;
+    height:auto;
+    border:0;
+  "
+/>
 
-                <div
-                  style="
-                    margin-top:6px;
-                    font-size:12px;
-                    color:#cbd5e1;
-                    letter-spacing:0.4px;
-                  "
-                >
-                  Software Solutions
-                </div>
+<div
+  style="
+    margin-top:8px;
+    font-size:12px;
+    color:#cbd5e1;
+    letter-spacing:0.4px;
+  "
+>
+  Software Solutions
+</div>
               </td>
             </tr>
 
@@ -154,27 +156,27 @@ function emailTemplate(input: {
                 >
                   <tr>
                     <td
-                      bgcolor="#ff6a00"
-                      style="
-                        border-radius:8px;
-                        background:#ff6a00;
-                      "
-                    >
-                      <a
-                        href="${input.link}"
-                        style="
-                          display:inline-block;
-                          padding:14px 22px;
-                          color:#ffffff;
-                          text-decoration:none;
-                          font-size:15px;
-                          font-weight:700;
-                          border-radius:8px;
-                        "
-                      >
-                        ${input.buttonText}
-                      </a>
-                    </td>
+  bgcolor="#ff6a00"
+  style="
+    background:#ff6a00;
+    border-radius:6px;
+    padding:12px 18px;
+  "
+>
+  <a
+    href="${input.link}"
+    style="
+      display:inline-block;
+      color:#ffffff;
+      text-decoration:none;
+      font-size:15px;
+      font-weight:700;
+      line-height:1;
+    "
+  >
+    ${input.buttonText}
+  </a>
+</td>
                   </tr>
                 </table>
               </td>
@@ -280,11 +282,7 @@ export async function sendCustomerPortalEmail(
     link,
   });
 
-  const result = await sendEmail(
-    customer.email,
-    subject,
-    html,
-  );
+  const result = await sendEmail(customer.email, subject, html);
 
   await writeAudit({
     action: `customer.portal_email_${reason}`,
