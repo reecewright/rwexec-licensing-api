@@ -53,6 +53,7 @@ checkoutRouter.get("/:productSlug/:planSlug", async (req, res, next) => {
       throw new Error("Stripe Checkout did not return a checkout URL.");
     }
 
+    
     res.setHeader("Cache-Control", "no-store");
     return res.redirect(303, session.url);
   } catch (error) {
