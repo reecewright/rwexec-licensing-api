@@ -13,7 +13,18 @@ export const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "form-action": [
+          "'self'",
+          "https://billing.stripe.com",
+        ],
+      },
+    },
+  }),
+);
 
 // Stripe must receive the exact raw request body so webhook signatures can be verified.
 app.use("/v1/stripe", stripeWebhookRouter);
