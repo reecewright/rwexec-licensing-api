@@ -217,13 +217,83 @@ async function ensureCustomer(customerId: string, fallback?: StripeObject) {
   });
 }
 
+function planActivationLimit(
+  entitlements: Array<{
+    key: string;
+    type: string;
+    limit: number | null;
+  }>,
+): number | null {
+  const entitlement = entitlements.find(
+    (item) => item.key === "site_activations" && item.type === "LIMIT",
+  );
+
+  if (
+    !entitlement ||
+    typeof entitlement.limit !== "number" ||
+    !Number.isInteger(entitlement.limit) ||
+    entitlement.limit < 1
+  ) {
+    return null;
+  }
+
+  return entitlement.limit;
+}
+
 async function ensureSubscriptionLicence(subscriptionId: string) {
   const subscription = await prisma.subscription.findUnique({
     where: { id: subscriptionId },
-    include: { product: true, licenses: true, customer: true },
+    include: {
+      product: true,
+      licenses: true,
+      customer: true,
+      plan: {
+        include: {
+          entitlements: true,
+        },
+      },
+    },
   });
-  if (!subscription || subscription.licenses.length > 0) return null;
+
+  if (!subscription) return null;
+
+  const configuredActivationLimit = planActivationLimit(
+    subscription.plan?.entitlements ?? [],
+  );
+
+  if (subscription.licenses.length > 0) {
+    if (configuredActivationLimit !== null) {
+      for (const licence of subscription.licenses) {
+        if (licence.activationLimit === configuredActivationLimit) continue;
+
+        const previousActivationLimit = licence.activationLimit;
+
+        await prisma.license.update({
+          where: { id: licence.id },
+          data: { activationLimit: configuredActivationLimit },
+        });
+
+        await writeAudit({
+          action: "license.activation_limit_synced",
+          entityType: "license",
+          entityId: licence.id,
+          summary: `Licence activation limit synced from subscription plan (${previousActivationLimit} → ${configuredActivationLimit})`,
+          metadata: {
+            subscriptionId: subscription.id,
+            planId: subscription.planId,
+            previousActivationLimit,
+            activationLimit: configuredActivationLimit,
+          },
+        });
+      }
+    }
+
+    return subscription.licenses[0];
+  }
+
   if (!["ACTIVE", "TRIALING"].includes(subscription.status)) return null;
+
+  const activationLimit = configuredActivationLimit ?? 1;
 
   let rawKey = "";
   let keyHash = "";
@@ -245,7 +315,7 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
       productId: subscription.productId,
       customerId: subscription.customerId,
       subscriptionId: subscription.id,
-      activationLimit: 1,
+      activationLimit,
     },
   });
 
@@ -258,7 +328,9 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
     summary: `Licence automatically created for Stripe subscription (${subscription.customer.email})`,
     metadata: {
       subscriptionId: subscription.id,
+      planId: subscription.planId,
       keyLastFour: licence.keyLastFour,
+      activationLimit: licence.activationLimit,
       deliveryPrepared: true,
     },
   });
