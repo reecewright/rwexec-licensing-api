@@ -142,7 +142,7 @@ model License {
   expiresAt       DateTime?
   productId       String
   customerId      String?
-  subscriptionId  String?
+  subscriptionId  String?        @unique
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
