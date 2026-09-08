@@ -71,52 +71,35 @@ function expectedOrigin(req: Request) {
   return `${req.protocol || "https"}://${req.get("host") || ACCOUNT_HOST}`;
 }
 
-function sameOriginPost(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  if (req.method !== "POST") {
-    return next();
+function sameOriginPost(req: Request, res: Response, next: NextFunction) {
+  if (req.method !== "POST") return next();
+
+  const fetchSite = String(req.get("sec-fetch-site") || "").toLowerCase();
+
+  // Reject only requests the browser explicitly identifies as cross-site.
+  // Same-origin, same-site and direct/none navigations are valid.
+  if (fetchSite === "cross-site") {
+    return res
+      .status(403)
+      .send("Request could not be verified. Refresh the page and try again.");
   }
 
-  const expected = expectedOrigin(req);
   const origin = requestOrigin(req);
 
-  /*
-   * Modern browsers send Sec-Fetch-Site on navigations and form
-   * submissions. Explicitly reject requests coming from another site.
-   */
-  const fetchSite = String(
-    req.get("sec-fetch-site") || "",
-  ).toLowerCase();
-
-  if (
-    fetchSite &&
-    fetchSite !== "same-origin" &&
-    fetchSite !== "none"
-  ) {
-    return res
-      .status(403)
-      .send(
-        "Request could not be verified. Refresh the page and try again.",
-      );
-  }
-
-  /*
-   * If the browser supplied Origin or Referer, it must match the
-   * current RWExec account origin.
-   *
-   * Some legitimate same-origin form navigations omit both headers,
-   * especially with a strict Referrer-Policy, so absence alone is not
-   * considered a failure.
-   */
-  if (origin && origin !== expected) {
-    return res
-      .status(403)
-      .send(
-        "Request could not be verified. Refresh the page and try again.",
-      );
+  // Validate Origin/Referer when supplied, but do not require it.
+  if (origin && origin !== "null") {
+    try {
+      const originUrl = new URL(origin);
+      if (originUrl.hostname.toLowerCase() !== req.hostname.toLowerCase()) {
+        return res
+          .status(403)
+          .send("Request could not be verified. Refresh the page and try again.");
+      }
+    } catch {
+      return res
+        .status(403)
+        .send("Request could not be verified. Refresh the page and try again.");
+    }
   }
 
   return next();

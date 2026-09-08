@@ -72,17 +72,19 @@ export function setCustomerSession(res: Response, customerId: string) {
     secure: config.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: PORTAL_SESSION_SECONDS * 1000,
-    path: "/account",
+    path: "/",
   });
 }
 
 export function clearCustomerSession(res: Response) {
-  res.clearCookie(PORTAL_COOKIE, {
+  const cookieOptions = {
     httpOnly: true,
     secure: config.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/account",
-  });
+    sameSite: "lax" as const,
+  };
+
+  res.clearCookie(PORTAL_COOKIE, { ...cookieOptions, path: "/" });
+  res.clearCookie(PORTAL_COOKIE, { ...cookieOptions, path: "/account" });
 }
 
 export function customerIdFromCookie(cookieHeader?: string) {
