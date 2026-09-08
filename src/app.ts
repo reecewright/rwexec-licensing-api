@@ -77,6 +77,37 @@ app.use((req, res, next) => {
   next();
 });
 
+const adminHostRouter = express.Router();
+
+adminHostRouter.use(
+  rateLimit({
+    windowMs: 60_000,
+    limit: 120,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  }),
+  adminWebRouter,
+);
+
+app.use((req, res, next) => {
+  const hostname = req.hostname.toLowerCase();
+
+  if (hostname === "admin.rwexec.com") {
+    return adminHostRouter(req, res, next);
+  }
+
+  next();
+});
+
+/*
+ * Keep /account available on the API domain as a fallback.
+ */
+app.use(
+  "/account",
+  accountRateLimiter,
+  customerPortalRouter,
+);
+
 /*
  * Keep /account available on the API domain as a fallback.
  */

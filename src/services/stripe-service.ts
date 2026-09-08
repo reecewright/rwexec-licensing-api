@@ -474,7 +474,6 @@ export async function cancelStripeSubscriptionPlanChange(
 export async function resumeStripeSubscription(subscriptionId: string) {
   const params = new URLSearchParams();
   params.set("cancel_at_period_end", "false");
-  params.set("cancel_at", "");
 
   const subscription = await stripeRequest(
     `/subscriptions/${encodeURIComponent(subscriptionId)}`,
