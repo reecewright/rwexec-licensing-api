@@ -454,6 +454,55 @@ customerPortalRouter.get("/assets/rwexec-favicon.png", (_req, res) => {
   res.sendFile(path.resolve(process.cwd(), "src/admin/assets/rwexec-favicon.png"));
 });
 
+customerPortalRouter.get("/assets/licence-key.js", (_req, res) => {
+  res.type("application/javascript").send(`(() => {
+  const key = document.getElementById("licence-key");
+  const toggle = document.getElementById("toggle-licence-key");
+  const copy = document.getElementById("copy-licence-key");
+  const status = document.getElementById("copy-status");
+
+  if (!key || !toggle || !copy || !status) return;
+
+  let shown = false;
+
+  function setShown(nextShown) {
+    shown = nextShown;
+    key.style.filter = shown ? "none" : "blur(7px)";
+    key.style.userSelect = shown ? "text" : "none";
+    toggle.textContent = shown ? "Hide" : "Reveal";
+    copy.disabled = !shown;
+    copy.setAttribute("aria-disabled", shown ? "false" : "true");
+    status.textContent = shown
+      ? "The licence key is visible. You can now copy it."
+      : "The key is hidden by default on each visit.";
+  }
+
+  setShown(false);
+
+  toggle.addEventListener("click", () => {
+    setShown(!shown);
+  });
+
+  copy.addEventListener("click", async () => {
+    if (!shown) return;
+
+    const value = key.getAttribute("data-key") || "";
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      status.textContent = "Licence key copied to clipboard.";
+      copy.textContent = "Copied";
+      window.setTimeout(() => {
+        copy.textContent = "Copy key";
+      }, 1800);
+    } catch {
+      status.textContent = "Copy was blocked by your browser. Select the visible key and copy it manually.";
+    }
+  });
+})();`);
+});
+
 customerPortalRouter.get("/checkout-success", async (req, res, next) => {
   try {
     const sessionId = String(req.query.session_id || "");
@@ -813,6 +862,6 @@ customerPortalRouter.post("/licenses/:id/reveal", async (req, res, next) => {
     if (!rawKey) return res.status(409).send(appShell(req, "Licence unavailable", "licenses", customer, `<div class="page-head"><div><h1>Licence key unavailable</h1><p>The full key is not stored for this older licence. The licence itself is unchanged and can continue working on existing sites.</p></div></div><section class="account-card"><div class="notice info"><strong>Need the full key?</strong>Contact RWExec if you need this licence regenerated. Regeneration would replace the existing key, so it should only be used when necessary.</div><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></section>`));
     const label = licence.subscription ? subscriptionDisplayName({ label: licence.subscription.label, product: licence.subscription.product, plan: licence.subscription.plan }) : licence.product.name;
     const safeRawKey = escapeHtml(rawKey);
-    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(licence.product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key">Copy key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script>(function(){const key=document.getElementById('licence-key');const toggle=document.getElementById('toggle-licence-key');const copy=document.getElementById('copy-licence-key');const status=document.getElementById('copy-status');if(!key||!toggle||!copy)return;let shown=false;toggle.addEventListener('click',function(){shown=!shown;key.style.filter=shown?'none':'blur(7px)';key.style.userSelect=shown?'text':'none';toggle.textContent=shown?'Hide':'Reveal';});copy.addEventListener('click',async function(){const value=key.getAttribute('data-key')||'';try{await navigator.clipboard.writeText(value);status.textContent='Licence key copied to clipboard.';copy.textContent='Copied';setTimeout(function(){copy.textContent='Copy key';},1800);}catch(e){shown=true;key.style.filter='none';key.style.userSelect='text';toggle.textContent='Hide';status.textContent='Copy was blocked by your browser. The key has been revealed so you can copy it manually.';}});})();</script>`));
+    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(licence.product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key" disabled aria-disabled="true">Copy key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script src="${portalPath(req, "/assets/licence-key.js")}" defer></script>`));
   } catch (error) { next(error); }
 });
