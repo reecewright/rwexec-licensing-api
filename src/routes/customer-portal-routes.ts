@@ -15,8 +15,11 @@ import {
   sendCustomerPortalEmail,
 } from "../services/email-service.js";
 import {
-  createBillingPortalSession,
+  createPaymentMethodPortalSession,
+  createSubscriptionCancelPortalSession,
+  createSubscriptionUpdateConfirmPortalSession,
   retrieveCheckoutSession,
+  scheduleStripeSubscriptionPlanChange,
 } from "../services/stripe-service.js";
 
 export const customerPortalRouter = Router();
@@ -62,6 +65,26 @@ function normaliseCustomerCookiePath(req: Request, res: Response) {
 
 function logoBlock(req: Request) {
   return `<div class="portal-logo-wrap"><img class="portal-logo" src="${portalPath(req, "/assets/rwexec-logo.png")}" alt="RWExec"></div>`;
+}
+
+function planActivationLimit(plan: {
+  entitlements?: Array<{ key: string; type: string; limit: number | null }>;
+} | null | undefined) {
+  const entitlement = plan?.entitlements?.find(
+    (item) => item.key === "site_activations" && item.type === "LIMIT",
+  );
+
+  return typeof entitlement?.limit === "number" && entitlement.limit > 0
+    ? entitlement.limit
+    : null;
+}
+
+function planPrice(plan: { priceMinor: number | null; billingInterval: string | null }) {
+  if (typeof plan.priceMinor !== "number") return "Custom price";
+  const amount = `£${(plan.priceMinor / 100).toFixed(2)}`;
+  if (plan.billingInterval === "month") return `${amount}/month`;
+  if (plan.billingInterval === "year") return `${amount}/year`;
+  return amount;
 }
 
 function shell(req: Request, title: string, body: string) {
@@ -149,6 +172,43 @@ function shell(req: Request, title: string, body: string) {
       color: #64748b;
     }
 
+    .plan-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .plan-option {
+      border: 1px solid #dbe2ea;
+      border-radius: 10px;
+      padding: 16px;
+      background: #ffffff;
+    }
+
+    .plan-option h3 {
+      margin: 0 0 6px;
+    }
+
+    .plan-option__meta {
+      margin-bottom: 12px;
+      color: #64748b;
+      font-size: 13px;
+    }
+
+    .plan-option__actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .billing-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
     @media (max-width: 720px) {
       .portal-head {
         align-items: stretch;
@@ -158,6 +218,10 @@ function shell(req: Request, title: string, body: string) {
       .portal-logo {
         width: 190px;
         max-width: 70vw;
+      }
+
+      .plan-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -340,15 +404,12 @@ customerPortalRouter.get("/", async (req, res, next) => {
           : "";
 
         const manageButton = canManage
-          ? `<form
-               method="post"
-               action="${portalPath(req, `/subscriptions/${s.id}/manage`)}"
-               class="subscription-action"
+          ? `<a
+               class="button secondary subscription-action"
+               href="${portalPath(req, `/subscriptions/${s.id}/manage`)}"
              >
-               <button class="button secondary" type="submit">
-                 Manage subscription
-               </button>
-             </form>`
+               Manage subscription
+             </a>`
           : `<span class="muted">Managed by RWExec</span>`;
 
         return `<tr>
@@ -470,7 +531,7 @@ customerPortalRouter.get("/", async (req, res, next) => {
   }
 });
 
-customerPortalRouter.post(
+customerPortalRouter.get(
   "/subscriptions/:id/manage",
   async (req, res, next) => {
     try {
@@ -487,9 +548,21 @@ customerPortalRouter.post(
           customerId,
           externalProvider: "stripe",
         },
+        include: {
+          product: true,
+          plan: {
+            include: {
+              entitlements: true,
+            },
+          },
+        },
       });
 
-      if (!subscription?.externalCustomerId) {
+      if (
+        !subscription?.externalCustomerId ||
+        !subscription.externalSubscriptionId ||
+        !subscription.plan
+      ) {
         return res.status(404).send(
           shell(
             req,
@@ -508,15 +581,235 @@ customerPortalRouter.post(
         );
       }
 
-      const session = await createBillingPortalSession({
+      const plans = await prisma.plan.findMany({
+        where: {
+          productId: subscription.productId,
+          active: true,
+          stripePriceId: { not: null },
+        },
+        orderBy: [
+          { priceMinor: "asc" },
+          { name: "asc" },
+        ],
+        include: {
+          entitlements: true,
+        },
+      });
+
+      const currentLimit = planActivationLimit(subscription.plan);
+      const eligiblePlans = plans.filter(
+        (plan) => planActivationLimit(plan) !== null,
+      );
+
+      const scheduledMessage =
+        req.query.scheduled === "1"
+          ? `<div class="alert success">
+              Your plan change has been scheduled for the end of the current billing period.
+              Your current plan and activation allowance remain unchanged until then.
+            </div>`
+          : "";
+
+      const planOptions = eligiblePlans
+        .filter((plan) => plan.id !== subscription.planId)
+        .map((plan) => {
+          const targetLimit = planActivationLimit(plan);
+          const lowerTier =
+            currentLimit !== null &&
+            targetLimit !== null &&
+            targetLimit < currentLimit;
+          const shorterSameTier =
+            currentLimit !== null &&
+            targetLimit === currentLimit &&
+            subscription.plan?.billingInterval === "year" &&
+            plan.billingInterval === "month";
+          const deferred = lowerTier || shorterSameTier;
+          const actionLabel = deferred
+            ? "Schedule for renewal"
+            : "Switch now";
+          const actionNote = deferred
+            ? "No immediate credit or loss of activations."
+            : "Stripe will show any prorated charge before you confirm.";
+
+          return `<div class="plan-option">
+            <h3>${escapeHtml(plan.name)}</h3>
+            <div class="plan-option__meta">
+              ${escapeHtml(planPrice(plan))} · ${targetLimit} site${targetLimit === 1 ? "" : "s"}
+            </div>
+            <div class="portal-note" style="margin-bottom:12px">
+              ${escapeHtml(actionNote)}
+            </div>
+            <form
+              method="post"
+              action="${portalPath(req, `/subscriptions/${subscription.id}/change-plan`)}"
+            >
+              <input type="hidden" name="plan_id" value="${escapeHtml(plan.id)}">
+              <button class="button ${deferred ? "secondary" : "primary"}" type="submit">
+                ${escapeHtml(actionLabel)}
+              </button>
+            </form>
+          </div>`;
+        })
+        .join("");
+
+      return res.send(
+        shell(
+          req,
+          "Manage subscription",
+          `<div class="portal-head">
+            <div>
+              ${logoBlock(req)}
+              <h1>Manage subscription</h1>
+              <div class="muted">${escapeHtml(subscription.product.name)}</div>
+            </div>
+            <a class="button secondary" href="${accountUrl}">Back to account</a>
+          </div>
+
+          ${scheduledMessage}
+
+          <section class="panel">
+            <h2>Current plan</h2>
+            <p>
+              <strong>${escapeHtml(subscription.plan.name)}</strong>
+              · ${escapeHtml(planPrice(subscription.plan))}
+              ${currentLimit ? ` · ${currentLimit} site${currentLimit === 1 ? "" : "s"}` : ""}
+            </p>
+            <p class="muted">
+              Current billing period ends
+              ${subscription.currentPeriodEnd
+                ? escapeHtml(subscription.currentPeriodEnd.toISOString().slice(0, 10))
+                : "at your next Stripe renewal"}.
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2>Change plan</h2>
+            <p class="muted">
+              Upgrades are confirmed securely in Stripe and take effect immediately.
+              Downgrades are scheduled for your renewal date.
+            </p>
+            <div class="plan-grid">
+              ${planOptions || `<div class="muted">No alternative plans are currently available.</div>`}
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Billing & cancellation</h2>
+            <div class="billing-actions">
+              <form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/payment-method`)}">
+                <button class="button secondary" type="submit">Update payment method</button>
+              </form>
+              <form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel`)}">
+                <button class="button secondary" type="submit">Cancel subscription</button>
+              </form>
+            </div>
+          </section>`,
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+customerPortalRouter.post(
+  "/subscriptions/:id/change-plan",
+  async (req, res, next) => {
+    try {
+      const customerId = customerIdFromCookie(req.headers.cookie);
+      const accountUrl = portalPath(req);
+      if (!customerId) return res.redirect(accountUrl);
+
+      const subscription = await prisma.subscription.findFirst({
+        where: {
+          id: req.params.id,
+          customerId,
+          externalProvider: "stripe",
+        },
+        include: {
+          plan: { include: { entitlements: true } },
+        },
+      });
+
+      const targetPlanId = String(req.body.plan_id || "");
+      const targetPlan = targetPlanId
+        ? await prisma.plan.findFirst({
+            where: {
+              id: targetPlanId,
+              productId: subscription?.productId,
+              active: true,
+              stripePriceId: { not: null },
+            },
+            include: { entitlements: true },
+          })
+        : null;
+
+      if (
+        !subscription?.externalCustomerId ||
+        !subscription.externalSubscriptionId ||
+        !subscription.plan ||
+        !targetPlan?.stripePriceId ||
+        targetPlan.id === subscription.planId
+      ) {
+        return res.status(400).send(
+          shell(
+            req,
+            "Plan change unavailable",
+            `<section class="panel portal-login">
+              ${logoBlock(req)}
+              <h1>That plan change is not available</h1>
+              <a class="button secondary" href="${portalPath(req, `/subscriptions/${req.params.id}/manage`)}">
+                Back to subscription
+              </a>
+            </section>`,
+          ),
+        );
+      }
+
+      const currentLimit = planActivationLimit(subscription.plan);
+      const targetLimit = planActivationLimit(targetPlan);
+
+      if (currentLimit === null || targetLimit === null) {
+        throw new Error("Plan activation limits are not configured.");
+      }
+
+      const lowerTier = targetLimit < currentLimit;
+      const shorterSameTier =
+        targetLimit === currentLimit &&
+        subscription.plan.billingInterval === "year" &&
+        targetPlan.billingInterval === "month";
+      const deferred = lowerTier || shorterSameTier;
+
+      if (deferred) {
+        if (
+          targetPlan.billingInterval !== "month" &&
+          targetPlan.billingInterval !== "year"
+        ) {
+          throw new Error("Target plan billing interval is not supported.");
+        }
+
+        await scheduleStripeSubscriptionPlanChange({
+          subscriptionId: subscription.externalSubscriptionId,
+          targetPriceId: targetPlan.stripePriceId,
+          targetBillingInterval: targetPlan.billingInterval,
+        });
+
+        return res.redirect(
+          `${portalPath(req, `/subscriptions/${subscription.id}/manage`)}?scheduled=1`,
+        );
+      }
+
+      const session = await createSubscriptionUpdateConfirmPortalSession({
         customerId: subscription.externalCustomerId,
-        returnUrl: portalAbsoluteUrl(req),
+        subscriptionId: subscription.externalSubscriptionId,
+        targetPriceId: targetPlan.stripePriceId,
+        returnUrl: portalAbsoluteUrl(
+          req,
+          `/subscriptions/${subscription.id}/manage`,
+        ),
       });
 
       if (!session.url || typeof session.url !== "string") {
-        throw new Error(
-          "Stripe Billing Portal did not return a portal URL.",
-        );
+        throw new Error("Stripe did not return a plan-change URL.");
       }
 
       return res.redirect(303, session.url);
@@ -525,6 +818,83 @@ customerPortalRouter.post(
     }
   },
 );
+
+customerPortalRouter.post(
+  "/subscriptions/:id/payment-method",
+  async (req, res, next) => {
+    try {
+      const customerId = customerIdFromCookie(req.headers.cookie);
+      const accountUrl = portalPath(req);
+      if (!customerId) return res.redirect(accountUrl);
+
+      const subscription = await prisma.subscription.findFirst({
+        where: {
+          id: req.params.id,
+          customerId,
+          externalProvider: "stripe",
+        },
+      });
+
+      if (!subscription?.externalCustomerId) {
+        return res.status(404).send(shell(req, "Subscription unavailable", `<section class="panel">Subscription unavailable.</section>`));
+      }
+
+      const session = await createPaymentMethodPortalSession({
+        customerId: subscription.externalCustomerId,
+        returnUrl: portalAbsoluteUrl(req, `/subscriptions/${subscription.id}/manage`),
+      });
+
+      if (!session.url || typeof session.url !== "string") {
+        throw new Error("Stripe did not return a payment-method URL.");
+      }
+
+      return res.redirect(303, session.url);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+customerPortalRouter.post(
+  "/subscriptions/:id/cancel",
+  async (req, res, next) => {
+    try {
+      const customerId = customerIdFromCookie(req.headers.cookie);
+      const accountUrl = portalPath(req);
+      if (!customerId) return res.redirect(accountUrl);
+
+      const subscription = await prisma.subscription.findFirst({
+        where: {
+          id: req.params.id,
+          customerId,
+          externalProvider: "stripe",
+        },
+      });
+
+      if (
+        !subscription?.externalCustomerId ||
+        !subscription.externalSubscriptionId
+      ) {
+        return res.status(404).send(shell(req, "Subscription unavailable", `<section class="panel">Subscription unavailable.</section>`));
+      }
+
+      const session = await createSubscriptionCancelPortalSession({
+        customerId: subscription.externalCustomerId,
+        subscriptionId: subscription.externalSubscriptionId,
+        returnUrl: portalAbsoluteUrl(req, `/subscriptions/${subscription.id}/manage`),
+      });
+
+      if (!session.url || typeof session.url !== "string") {
+        throw new Error("Stripe did not return a cancellation URL.");
+      }
+
+      return res.redirect(303, session.url);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 
 customerPortalRouter.post("/request-link", async (req, res, next) => {
   try {

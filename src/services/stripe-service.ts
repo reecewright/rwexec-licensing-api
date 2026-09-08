@@ -114,6 +114,215 @@ export async function createBillingPortalSession(input: {
   });
 }
 
+async function createBillingPortalFlowSession(input: {
+  customerId: string;
+  returnUrl: string;
+  params: URLSearchParams;
+}) {
+  input.params.set("customer", input.customerId);
+  input.params.set("return_url", input.returnUrl);
+  input.params.set("flow_data[after_completion][type]", "redirect");
+  input.params.set(
+    "flow_data[after_completion][redirect][return_url]",
+    input.returnUrl,
+  );
+
+  return stripeRequest("/billing_portal/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: input.params.toString(),
+  });
+}
+
+export async function createPaymentMethodPortalSession(input: {
+  customerId: string;
+  returnUrl: string;
+}) {
+  const params = new URLSearchParams();
+  params.set("flow_data[type]", "payment_method_update");
+
+  return createBillingPortalFlowSession({ ...input, params });
+}
+
+export async function createSubscriptionCancelPortalSession(input: {
+  customerId: string;
+  subscriptionId: string;
+  returnUrl: string;
+}) {
+  const params = new URLSearchParams();
+  params.set("flow_data[type]", "subscription_cancel");
+  params.set(
+    "flow_data[subscription_cancel][subscription]",
+    input.subscriptionId,
+  );
+
+  return createBillingPortalFlowSession({ ...input, params });
+}
+
+export async function createSubscriptionUpdateConfirmPortalSession(input: {
+  customerId: string;
+  subscriptionId: string;
+  targetPriceId: string;
+  returnUrl: string;
+}) {
+  const subscription = await stripeRequest(
+    `/subscriptions/${encodeURIComponent(input.subscriptionId)}`,
+  );
+  const itemId = asId(subscription?.items?.data?.[0]?.id);
+
+  if (!itemId) {
+    throw new Error("Stripe subscription does not contain an updatable item.");
+  }
+
+  const params = new URLSearchParams();
+  params.set("flow_data[type]", "subscription_update_confirm");
+  params.set(
+    "flow_data[subscription_update_confirm][subscription]",
+    input.subscriptionId,
+  );
+  params.set(
+    "flow_data[subscription_update_confirm][items][0][id]",
+    itemId,
+  );
+  params.set(
+    "flow_data[subscription_update_confirm][items][0][price]",
+    input.targetPriceId,
+  );
+  params.set(
+    "flow_data[subscription_update_confirm][items][0][quantity]",
+    "1",
+  );
+
+  return createBillingPortalFlowSession({ ...input, params });
+}
+
+export async function scheduleStripeSubscriptionPlanChange(input: {
+  subscriptionId: string;
+  targetPriceId: string;
+  targetBillingInterval: "month" | "year";
+}) {
+  const subscription = await stripeRequest(
+    `/subscriptions/${encodeURIComponent(input.subscriptionId)}`,
+  );
+
+  const existingScheduleId = asId(subscription.schedule);
+  if (existingScheduleId) {
+    throw new Error(
+      "This subscription already has a scheduled change. Please contact RWExec support before scheduling another one.",
+    );
+  }
+
+  const currentItem = subscription?.items?.data?.[0] as
+    | StripeObject
+    | undefined;
+  const currentPriceId = asId(currentItem?.price);
+  const quantity =
+    typeof currentItem?.quantity === "number" && currentItem.quantity > 0
+      ? currentItem.quantity
+      : 1;
+
+  if (!currentPriceId) {
+    throw new Error("Stripe subscription does not contain a current price.");
+  }
+
+  if (currentPriceId === input.targetPriceId) {
+    throw new Error("The subscription is already on that price.");
+  }
+
+  const createParams = new URLSearchParams();
+  createParams.set("from_subscription", input.subscriptionId);
+
+  const schedule = await stripeRequest("/subscription_schedules", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: createParams.toString(),
+  });
+
+  const scheduleId = asId(schedule.id);
+  const currentPhase = schedule?.phases?.[0] as StripeObject | undefined;
+  const currentPhaseStart = currentPhase?.start_date;
+  const currentPhaseEnd = currentPhase?.end_date;
+
+  if (
+    !scheduleId ||
+    typeof currentPhaseStart !== "number" ||
+    typeof currentPhaseEnd !== "number"
+  ) {
+    if (scheduleId) {
+      try {
+        await stripeRequest(
+          `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`,
+          { method: "POST" },
+        );
+      } catch {
+        // Preserve the original error below.
+      }
+    }
+    throw new Error(
+      "Stripe did not return the current schedule phase needed to defer this plan change.",
+    );
+  }
+
+  const updateParams = new URLSearchParams();
+  updateParams.set("end_behavior", "release");
+  updateParams.set("proration_behavior", "none");
+
+  updateParams.set("phases[0][items][0][price]", currentPriceId);
+  updateParams.set("phases[0][items][0][quantity]", String(quantity));
+  updateParams.set("phases[0][start_date]", String(currentPhaseStart));
+  updateParams.set("phases[0][end_date]", String(currentPhaseEnd));
+  updateParams.set("phases[0][proration_behavior]", "none");
+
+  updateParams.set("phases[1][items][0][price]", input.targetPriceId);
+  updateParams.set("phases[1][items][0][quantity]", String(quantity));
+  updateParams.set(
+    "phases[1][duration][interval]",
+    input.targetBillingInterval,
+  );
+  updateParams.set("phases[1][duration][interval_count]", "1");
+  updateParams.set("phases[1][proration_behavior]", "none");
+  updateParams.set("phases[1][metadata][rwexec_scheduled_plan_change]", "1");
+
+  try {
+    const updatedSchedule = await stripeRequest(
+      `/subscription_schedules/${encodeURIComponent(scheduleId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: updateParams.toString(),
+      },
+    );
+
+    await writeAudit({
+      action: "stripe.subscription_plan_change_scheduled",
+      entityType: "stripe_subscription",
+      entityId: input.subscriptionId,
+      summary: "Stripe subscription plan change scheduled for the next billing period",
+      metadata: {
+        scheduleId,
+        currentPriceId,
+        targetPriceId: input.targetPriceId,
+        effectiveAt: new Date(currentPhaseEnd * 1000).toISOString(),
+      },
+    });
+
+    return updatedSchedule;
+  } catch (error) {
+    try {
+      await stripeRequest(
+        `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`,
+        { method: "POST" },
+      );
+    } catch (releaseError) {
+      console.error(
+        "Could not release Stripe schedule after failed plan-change setup:",
+        releaseError,
+      );
+    }
+    throw error;
+  }
+}
+
 export function verifyStripeSignature(
   rawBody: Buffer,
   signatureHeader: string | undefined,
