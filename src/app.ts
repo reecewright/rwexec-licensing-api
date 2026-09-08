@@ -2,12 +2,13 @@ import crypto from "node:crypto";
 import express from "express";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
-
 import { adminRouter } from "./routes/admin-routes.js";
 import { adminWebRouter } from "./routes/admin-web-routes.js";
 import { licenseRouter } from "./routes/license-routes.js";
 import { stripeWebhookRouter } from "./routes/stripe-routes.js";
 import { customerPortalRouter } from "./routes/customer-portal-routes.js";
+import { prisma } from "./db.js";
+import { createCheckoutSession } from "./services/stripe-service.js";
 
 export const app = express();
 
@@ -41,11 +42,61 @@ app.get("/health", (_req, res) => {
   });
 });
 
+
+
 const accountRateLimiter = rateLimit({
   windowMs: 60_000,
   limit: 120,
   standardHeaders: "draft-8",
   legacyHeaders: false,
+});
+
+app.get("/checkout/:productSlug/:planSlug", async (req, res, next) => {
+  try {
+    const productSlug = String(req.params.productSlug || "").trim();
+    const planSlug = String(req.params.planSlug || "").trim();
+
+    const product = await prisma.product.findUnique({
+      where: { slug: productSlug },
+    });
+
+    if (!product || !product.active) {
+      return res.status(404).json({
+        error: "product_not_found",
+      });
+    }
+
+    const plan = await prisma.plan.findUnique({
+      where: {
+        productId_slug: {
+          productId: product.id,
+          slug: planSlug,
+        },
+      },
+    });
+
+    if (!plan || !plan.active || !plan.stripePriceId) {
+      return res.status(404).json({
+        error: "plan_not_found",
+      });
+    }
+
+    const session = await createCheckoutSession({
+      planId: plan.id,
+      successUrl:
+        "https://account.rwexec.com/checkout-success?session_id={CHECKOUT_SESSION_ID}",
+      cancelUrl:
+        "https://rwexec.com/reservations",
+    });
+
+    if (!session.url || typeof session.url !== "string") {
+      throw new Error("Stripe did not return a checkout URL.");
+    }
+
+    return res.redirect(303, session.url);
+  } catch (error) {
+    next(error);
+  }
 });
 
 /*
