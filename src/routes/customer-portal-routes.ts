@@ -1,4 +1,5 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { rateLimit } from "express-rate-limit";
 import path from "node:path";
 import { prisma } from "../db.js";
 import { adminCss } from "../admin/styles.js";
@@ -16,6 +17,7 @@ import {
 } from "../services/email-service.js";
 import {
   cancelStripeSubscriptionPlanChange,
+  createCheckoutSession,
   createPaymentMethodPortalSession,
   createSubscriptionCancelPortalSession,
   createSubscriptionUpdateConfirmPortalSession,
@@ -36,6 +38,49 @@ export const customerPortalRouter = Router();
 
 const ACCOUNT_HOST = "account.rwexec.com";
 const ENTITLED_STATUSES = ["ACTIVE", "TRIALING", "COMPLIMENTARY"];
+
+const magicLinkLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: "Too many sign-in link requests. Please wait a few minutes and try again.",
+});
+
+const licenceRevealLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: "Too many licence reveal requests. Please wait a moment and try again.",
+});
+
+function requestOrigin(req: Request) {
+  const origin = String(req.get("origin") || "").trim();
+  if (origin) return origin;
+  const referer = String(req.get("referer") || "").trim();
+  if (!referer) return null;
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return null;
+  }
+}
+
+function expectedOrigin(req: Request) {
+  return `${req.protocol || "https"}://${req.get("host") || ACCOUNT_HOST}`;
+}
+
+function sameOriginPost(req: Request, res: Response, next: NextFunction) {
+  if (req.method !== "POST") return next();
+  const origin = requestOrigin(req);
+  if (!origin || origin !== expectedOrigin(req)) {
+    return res.status(403).send("Request could not be verified. Refresh the page and try again.");
+  }
+  next();
+}
+
+customerPortalRouter.use(sameOriginPost);
 
 type PortalCustomer = {
   id: string;
@@ -138,6 +183,72 @@ function subscriptionDisplayName(subscription: {
     `${subscription.product.name}${subscription.plan ? ` · ${subscription.plan.name}` : ""}`;
 }
 
+type SubscriptionLifecycle = "active" | "ending" | "expired" | "attention";
+
+function subscriptionLifecycle(subscription: {
+  status: string;
+  cancelAtPeriodEnd: boolean;
+}) : SubscriptionLifecycle {
+  if (["CANCELED", "EXPIRED"].includes(subscription.status)) return "expired";
+  if (subscription.cancelAtPeriodEnd && ENTITLED_STATUSES.includes(subscription.status)) return "ending";
+  if (["PAST_DUE", "SUSPENDED"].includes(subscription.status)) return "attention";
+  return "active";
+}
+
+function billingPeriodText(subscription: {
+  status: string;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: Date | null;
+}) {
+  const lifecycle = subscriptionLifecycle(subscription);
+  if (lifecycle === "expired") return subscription.currentPeriodEnd ? `Ended ${shortDate(subscription.currentPeriodEnd)}` : "Ended";
+  if (lifecycle === "ending") return `Ends ${shortDate(subscription.currentPeriodEnd)}`;
+  return subscription.currentPeriodEnd ? `Next renewal ${shortDate(subscription.currentPeriodEnd)}` : "No renewal date";
+}
+
+function customerActivityText(event: {
+  action: string;
+  summary: string;
+  metadata: unknown;
+}) {
+  const metadata = event.metadata && typeof event.metadata === "object"
+    ? event.metadata as Record<string, unknown>
+    : {};
+
+  switch (event.action) {
+    case "subscription.label_updated":
+      return event.summary;
+    case "subscription.plan_changed":
+      return "Subscription plan changed";
+    case "subscription.cancellation_scheduled":
+      return "Subscription cancellation scheduled";
+    case "subscription.cancellation_reversed":
+    case "stripe.subscription_cancellation_reversed":
+      return "Subscription kept active";
+    case "subscription.reactivated":
+      return "Subscription reactivated";
+    case "subscription.status_changed": {
+      const status = typeof metadata.status === "string" ? metadata.status : "updated";
+      if (status === "PAST_DUE") return "Payment needs attention";
+      if (status === "CANCELED" || status === "EXPIRED") return "Subscription ended";
+      if (status === "ACTIVE") return "Subscription is active";
+      return null;
+    }
+    case "license.activation_customer_deactivated":
+      return "Website deactivated from licence";
+    case "customer.profile_updated":
+      return "Account details updated";
+    case "customer.email_changed":
+      return "Account email changed";
+    case "stripe.subscription_plan_change_cancelled":
+      return "Scheduled plan change cancelled";
+    case "license.stripe_auto_created":
+      return "Licence created and ready to use";
+    default:
+      return null;
+  }
+}
+
 function navLink(req: Request, href: string, label: string, active: string, key: string) {
   return `<a class="account-nav__link ${active === key ? "is-active" : ""}" href="${portalPath(req, href)}">${label}</a>`;
 }
@@ -229,6 +340,11 @@ function baseHead(req: Request, title: string, extraCss = "") {
     .licence-summary strong { display:block; font-size:14px; }
     .licence-summary span { color:var(--rw-muted); font-size:13px; }
     .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 18px; }
+    .tab-link { display:inline-flex; align-items:center; gap:7px; padding:9px 12px; border:1px solid #d6dce5; border-radius:999px; background:#fff; color:#334155; text-decoration:none; font-size:13px; font-weight:750; }
+    .tab-link.is-active { border-color:var(--rw-orange); background:rgba(254,107,2,.08); color:#9a3d00; }
+    .tab-count { display:inline-flex; min-width:22px; height:22px; padding:0 6px; align-items:center; justify-content:center; border-radius:999px; background:#eef2f7; font-size:11px; }
+    .tab-link.is-active .tab-count { background:#fff; }
     .button { display:inline-flex; align-items:center; justify-content:center; border-radius:8px; padding:10px 13px; font:inherit; font-weight:750; text-decoration:none; cursor:pointer; border:1px solid transparent; min-height:40px; }
     .button.primary { background:var(--rw-orange); color:#fff; border-color:var(--rw-orange); }
     .button.primary:hover { filter:brightness(.96); }
@@ -382,11 +498,16 @@ function licenceDeliveryText(licence: {
 function subscriptionCard(req: Request, subscription: Awaited<ReturnType<typeof loadCustomerSubscriptions>>[number]) {
   const licence = subscription.licenses[0];
   const displayName = subscriptionDisplayName(subscription);
-  const renewalText = subscription.cancelAtPeriodEnd
-    ? `Access until ${shortDate(subscription.currentPeriodEnd)}`
-    : subscription.currentPeriodEnd
-      ? `Renews ${shortDate(subscription.currentPeriodEnd)}`
-      : "No renewal date";
+  const lifecycle = subscriptionLifecycle(subscription);
+  const renewalText = lifecycle === "expired"
+    ? subscription.currentPeriodEnd
+      ? `Ended ${shortDate(subscription.currentPeriodEnd)}`
+      : "Ended"
+    : subscription.cancelAtPeriodEnd
+      ? `Access until ${shortDate(subscription.currentPeriodEnd)}`
+      : subscription.currentPeriodEnd
+        ? `Renews ${shortDate(subscription.currentPeriodEnd)}`
+        : "No renewal date";
   const delivery = licence ? licenceDeliveryText(licence) : null;
 
   return `<section class="account-card subscription-card">
@@ -532,20 +653,24 @@ customerPortalRouter.get("/", async (req, res, next) => {
     const activeSites = licences.reduce((sum, licence) => sum + licence.activations.length, 0);
     const totalSites = licences.reduce((sum, licence) => sum + licence.activationLimit, 0);
     const entityIds = [customer.id, ...subscriptions.map((s) => s.id), ...licences.map((l) => l.id)];
-    const activity = await prisma.auditLog.findMany({
+    const rawActivity = await prisma.auditLog.findMany({
       where: { entityId: { in: entityIds } },
       orderBy: { createdAt: "desc" },
-      take: 7,
+      take: 30,
     });
+    const activity = rawActivity
+      .map((event) => ({ event, text: customerActivityText(event) }))
+      .filter((item): item is { event: typeof rawActivity[number]; text: string } => Boolean(item.text))
+      .slice(0, 7);
     const attention = subscriptions.filter((s) => s.cancelAtPeriodEnd || ["PAST_DUE", "SUSPENDED"].includes(s.status));
     const nextRenewal = subscriptions
       .filter((s) => !s.cancelAtPeriodEnd && s.currentPeriodEnd)
       .sort((a, b) => (a.currentPeriodEnd?.getTime() || 0) - (b.currentPeriodEnd?.getTime() || 0))[0];
 
     const body = `<div class="page-head"><div><div class="eyebrow">Customer dashboard</div><h1>Welcome${customer.name ? `, ${escapeHtml(customer.name.split(" ")[0])}` : ""}</h1><p>Manage your RWExec subscriptions, licences, sites and account.</p></div></div>
-      ${attention.length ? `<div class="notice warning"><strong>${attention.length} subscription${attention.length === 1 ? " needs" : "s need"} your attention</strong>${attention.map((s) => `${escapeHtml(subscriptionDisplayName(s))}: ${s.cancelAtPeriodEnd ? `cancels ${escapeHtml(shortDate(s.currentPeriodEnd))}` : escapeHtml(s.status.replaceAll("_", " ").toLowerCase())}`).join(" · ")}</div>` : ""}
+      ${attention.length ? `<div class="notice warning"><strong>${attention.length} subscription${attention.length === 1 ? " needs" : "s need"} your attention</strong><a href="${portalPath(req, "/subscriptions")}" style="color:inherit;font-weight:700">Review subscriptions</a> to see the details.</div>` : ""}
       <div class="stats-grid"><div class="stat-card"><div class="stat-card__label">Active subscriptions</div><div class="stat-card__value">${activeSubscriptions.length}</div></div><div class="stat-card"><div class="stat-card__label">Sites activated</div><div class="stat-card__value">${activeSites}<span class="muted" style="font-size:16px"> / ${totalSites}</span></div></div><div class="stat-card"><div class="stat-card__label">Next renewal</div><div class="stat-card__value" style="font-size:19px;line-height:1.25">${nextRenewal ? escapeHtml(shortDate(nextRenewal.currentPeriodEnd)) : "—"}</div></div></div>
-      <div class="section-grid"><div><div class="card-head"><h2>Your subscriptions</h2><a class="button secondary" href="${portalPath(req, "/subscriptions")}">View all</a></div>${subscriptions.slice(0, 3).map((s) => subscriptionCard(req, s)).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}</div><div><section class="account-card"><h2>Recent activity</h2><div class="activity-list">${activity.length ? activity.map((event) => `<div class="activity-row"><strong>${escapeHtml(event.summary)}</strong><span>${escapeHtml(shortDate(event.createdAt))}</span></div>`).join("") : `<div class="muted small">No recent account activity.</div>`}</div></section><section class="account-card"><h2>Quick links</h2><div class="actions"><a class="button secondary" href="${portalPath(req, "/licenses")}">Manage sites</a><a class="button secondary" href="${portalPath(req, "/profile")}">Account details</a></div></section></div></div>`;
+      <div class="section-grid"><div><div class="card-head"><h2>Your subscriptions</h2><a class="button secondary" href="${portalPath(req, "/subscriptions")}">View all</a></div>${subscriptions.slice(0, 3).map((s) => subscriptionCard(req, s)).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}</div><div><section class="account-card"><h2>Recent activity</h2><div class="activity-list">${activity.length ? activity.map(({ event, text }) => `<div class="activity-row"><strong>${escapeHtml(text)}</strong><span>${escapeHtml(shortDate(event.createdAt))}</span></div>`).join("") : `<div class="muted small">No recent account activity.</div>`}</div></section><section class="account-card"><h2>Quick links</h2><div class="actions"><a class="button secondary" href="${portalPath(req, "/licenses")}">Manage sites</a><a class="button secondary" href="${portalPath(req, "/profile")}">Account details</a></div></section></div></div>`;
     return res.send(appShell(req, "Dashboard", "dashboard", customer, body));
   } catch (error) { next(error); }
 });
@@ -580,13 +705,96 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
+
     const subscriptions = await loadCustomerSubscriptions(customer.id);
-    const deactivated = req.query.deactivated === "1" ? `<div class="notice success"><strong>Site deactivated</strong>That activation slot is now available to use again.</div>` : "";
-    const cards = subscriptions.flatMap((subscription) => subscription.licenses.map((licence) => {
-      const delivery = licenceDeliveryText(licence);
-      return `<section class="account-card"><div class="card-head"><div><div class="eyebrow">${escapeHtml(subscriptionDisplayName(subscription))}</div><h2>${escapeHtml(subscription.product.name)} licence</h2><div class="subscription-meta"><span>•••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length} / ${licence.activationLimit} sites</span><span>${escapeHtml(licence.status.toLowerCase())}</span></div></div>${delivery.canReveal ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button primary" type="submit">Reveal licence key</button></form>` : ""}</div><div class="muted small">${escapeHtml(delivery.text)}</div><div class="site-list">${licence.activations.length ? licence.activations.map((activation) => `<div class="site-row"><div><div class="site-row__url">${escapeHtml(activation.siteUrl)}</div><div class="site-row__meta">Activated ${escapeHtml(shortDate(activation.activatedAt))}${activation.pluginVersion ? ` · Plugin ${escapeHtml(activation.pluginVersion)}` : ""}</div></div><form method="post" action="${portalPath(req, `/activations/${activation.id}/deactivate`)}"><button class="button secondary" type="submit">Deactivate</button></form></div>`).join("") : `<div class="empty-state" style="padding:20px">No active sites on this licence.</div>`}</div></section>`;
-    }));
-    const body = `<div class="page-head"><div><div class="eyebrow">Licences & sites</div><h1>Licence usage</h1><p>See which subscription each licence belongs to and manage the websites using its activation allowance.</p></div></div>${deactivated}${cards.join("") || `<section class="account-card empty-state">No licences yet.</section>`}`;
+    const requestedTab = String(req.query.status || "active");
+    const tab = ["active", "ending", "expired"].includes(requestedTab)
+      ? requestedTab as "active" | "ending" | "expired"
+      : "active";
+
+    const counts = { active: 0, ending: 0, expired: 0 };
+    for (const subscription of subscriptions) {
+      const lifecycle = subscriptionLifecycle(subscription);
+      if (lifecycle === "expired") counts.expired += subscription.licenses.length;
+      else if (lifecycle === "ending") counts.ending += subscription.licenses.length;
+      else counts.active += subscription.licenses.length;
+    }
+
+    const visibleSubscriptions = subscriptions.filter((subscription) => {
+      const lifecycle = subscriptionLifecycle(subscription);
+      if (tab === "expired") return lifecycle === "expired";
+      if (tab === "ending") return lifecycle === "ending";
+      return lifecycle === "active" || lifecycle === "attention";
+    });
+
+    const deactivated = req.query.deactivated === "1"
+      ? `<div class="notice success"><strong>Site deactivated</strong>That activation slot is now available to use again.</div>`
+      : "";
+    const reactivationCancelled = req.query.reactivation_cancelled === "1"
+      ? `<div class="notice info"><strong>Reactivation cancelled</strong>No changes were made to your licence.</div>`
+      : "";
+
+    const cards = visibleSubscriptions.flatMap((subscription) =>
+      subscription.licenses.map((licence) => {
+        const secret = licenceDeliveryText(licence);
+        const lifecycle = subscriptionLifecycle(subscription);
+        const canReactivate =
+          lifecycle === "expired" &&
+          !subscription.complimentary &&
+          subscription.externalProvider === "stripe" &&
+          Boolean(subscription.plan?.stripePriceId);
+
+        const lifecycleNotice = lifecycle === "ending"
+          ? `<div class="notice warning"><strong>Ending ${escapeHtml(shortDate(subscription.currentPeriodEnd))}</strong>This licence remains usable until the end of the paid period.</div>`
+          : lifecycle === "expired"
+            ? `<div class="notice info"><strong>Subscription ended</strong>${subscription.complimentary ? "This entitlement is managed directly by RWExec." : "Your licence history and activated sites are kept here so you can reactivate without losing the licence reference."}</div>`
+            : "";
+
+        const primaryAction = canReactivate
+          ? `<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/reactivate`)}"><button class="button primary" type="submit">Reactivate</button></form>`
+          : lifecycle === "expired" && subscription.complimentary
+            ? `<span class="muted small"><strong>Managed by RWExec</strong></span>`
+            : secret.canReveal
+              ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button primary" type="submit">Reveal licence key</button></form>`
+              : "";
+
+        return `<section class="account-card">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">${escapeHtml(subscriptionDisplayName(subscription))}</div>
+              <h2>${escapeHtml(subscription.product.name)} licence</h2>
+              <div class="subscription-meta">
+                <span>•••• ${escapeHtml(licence.keyLastFour)}</span>
+                <span>${licence.activations.length} / ${licence.activationLimit} sites</span>
+                <span>${escapeHtml(licence.status.toLowerCase())}</span>
+              </div>
+            </div>
+            <div class="actions">${primaryAction}</div>
+          </div>
+          ${lifecycleNotice}
+          <div class="muted small">${escapeHtml(secret.text)}</div>
+          <div class="site-list">
+            ${licence.activations.length
+              ? licence.activations.map((activation) => `<div class="site-row"><div><div class="site-row__url">${escapeHtml(activation.siteUrl)}</div><div class="site-row__meta">Activated ${escapeHtml(shortDate(activation.activatedAt))}${activation.pluginVersion ? ` · Plugin ${escapeHtml(activation.pluginVersion)}` : ""}</div></div>${lifecycle === "expired" ? "" : `<form method="post" action="${portalPath(req, `/activations/${activation.id}/deactivate`)}"><button class="button secondary" type="submit">Deactivate</button></form>`}</div>`).join("")
+              : `<div class="empty-state" style="padding:20px">No active sites on this licence.</div>`}
+          </div>
+        </section>`;
+      }),
+    );
+
+    const tabs = `<div class="tabs" aria-label="Licence status">
+      <a class="tab-link ${tab === "active" ? "is-active" : ""}" href="${portalPath(req, "/licenses?status=active")}">Active <span class="tab-count">${counts.active}</span></a>
+      <a class="tab-link ${tab === "ending" ? "is-active" : ""}" href="${portalPath(req, "/licenses?status=ending")}">Ending <span class="tab-count">${counts.ending}</span></a>
+      <a class="tab-link ${tab === "expired" ? "is-active" : ""}" href="${portalPath(req, "/licenses?status=expired")}">Expired <span class="tab-count">${counts.expired}</span></a>
+    </div>`;
+
+    const emptyText = tab === "expired"
+      ? "No expired licences."
+      : tab === "ending"
+        ? "No licences are currently ending."
+        : "No active licences yet.";
+
+    const body = `<div class="page-head"><div><div class="eyebrow">Licences & sites</div><h1>Licence usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div></div>${deactivated}${reactivationCancelled}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
     return res.send(appShell(req, "Licences & sites", "licenses", customer, body));
   } catch (error) { next(error); }
 });
@@ -611,7 +819,7 @@ customerPortalRouter.get("/billing", async (req, res, next) => {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
     const subscriptions = await loadCustomerSubscriptions(customer.id);
-    const body = `<div class="page-head"><div><div class="eyebrow">Billing</div><h1>Billing & renewals</h1><p>Plan changes and payment details are handled securely through Stripe, while RWExec keeps your licence entitlement in sync.</p></div></div>${subscriptions.map((s) => `<section class="account-card"><div class="card-head"><div><h2>${escapeHtml(subscriptionDisplayName(s))}</h2><div class="subscription-meta"><span>${escapeHtml(s.plan?.name || "Custom plan")}</span>${s.plan ? `<span>${escapeHtml(planPrice(s.plan))}</span>` : ""}<span>${s.cancelAtPeriodEnd ? `Ends ${escapeHtml(shortDate(s.currentPeriodEnd))}` : `Next renewal ${escapeHtml(shortDate(s.currentPeriodEnd))}`}</span></div></div><span class="status-pill ${statusClass(s.status)}">${escapeHtml(s.status.replaceAll("_", " ").toLowerCase())}</span></div>${s.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Cancellation scheduled</strong>Your subscription remains active until ${escapeHtml(date(s.currentPeriodEnd))}.</div>` : ""}<div class="actions"><a class="button primary" href="${portalPath(req, `/subscriptions/${s.id}/manage`)}">Manage subscription</a></div></section>`).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}`;
+    const body = `<div class="page-head"><div><div class="eyebrow">Billing</div><h1>Billing & renewals</h1><p>Plan changes and payment details are handled securely through Stripe, while RWExec keeps your licence entitlement in sync.</p></div></div>${subscriptions.map((s) => `<section class="account-card"><div class="card-head"><div><h2>${escapeHtml(subscriptionDisplayName(s))}</h2><div class="subscription-meta"><span>${escapeHtml(s.plan?.name || "Custom plan")}</span>${s.plan ? `<span>${escapeHtml(planPrice(s.plan))}</span>` : ""}<span>${escapeHtml(billingPeriodText(s))}</span></div></div><span class="status-pill ${statusClass(s.status)}">${escapeHtml(s.status.replaceAll("_", " ").toLowerCase())}</span></div>${s.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Cancellation scheduled</strong>Your subscription remains active until ${escapeHtml(date(s.currentPeriodEnd))}.</div>` : ""}<div class="actions"><a class="button primary" href="${portalPath(req, `/subscriptions/${s.id}/manage`)}">Manage subscription</a></div></section>`).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}`;
     return res.send(appShell(req, "Billing", "billing", customer, body));
   } catch (error) { next(error); }
 });
@@ -647,7 +855,7 @@ customerPortalRouter.post("/profile", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-customerPortalRouter.post("/profile/email", async (req, res, next) => {
+customerPortalRouter.post("/profile/email", magicLinkLimiter, async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
@@ -722,6 +930,20 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
     const licence = subscription.licenses[0];
     const displayName = subscriptionDisplayName(subscription);
 
+    const lifecycle = subscriptionLifecycle(subscription);
+
+    if (lifecycle === "expired") {
+      const canReactivate =
+        !subscription.complimentary &&
+        subscription.externalProvider === "stripe" &&
+        Boolean(subscription.plan.stripePriceId);
+      const action = canReactivate
+        ? `<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/reactivate`)}"><button class="button primary" type="submit">Reactivate subscription</button></form>`
+        : `<div class="muted"><strong>${subscription.complimentary ? "Managed by RWExec" : "Online reactivation is unavailable"}</strong>${subscription.complimentary ? " — this entitlement is controlled manually by RWExec." : ""}</div>`;
+      const body = `<div class="page-head"><div><div class="eyebrow">Manage subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to subscriptions</a></div><div class="notice info"><strong>Subscription ended</strong>Your previous subscription and licence history have been kept in your account.</div><section class="account-card"><div class="card-head"><div><h2>Previous plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span>` : ""}</div></div><span class="status-pill bad">Ended</span></div><div class="actions">${action}</div></section>`;
+      return res.send(appShell(req, `Manage ${displayName}`, "subscriptions", customer, body));
+    }
+
     const flash = req.query.scheduled === "1" ? `<div class="notice success"><strong>Plan change scheduled</strong>Your current plan and site allowance stay unchanged until renewal.</div>`
       : req.query.schedule_cancelled === "1" ? `<div class="notice success"><strong>Scheduled plan change removed</strong>Your current plan will now continue at renewal.</div>`
       : req.query.kept === "1" ? `<div class="notice success"><strong>Cancellation reversed</strong>Your subscription will now renew as normal.</div>`
@@ -753,11 +975,49 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
   } catch (error) { next(error); }
 });
 
+customerPortalRouter.post("/subscriptions/:id/reactivate", async (req, res, next) => {
+  try {
+    const customer = await requireCustomer(req, res);
+    if (!customer) return res.redirect(portalPath(req));
+
+    const subscription = await prisma.subscription.findFirst({
+      where: {
+        id: req.params.id,
+        customerId: customer.id,
+        complimentary: false,
+        externalProvider: "stripe",
+        status: { in: ["CANCELED", "EXPIRED"] },
+      },
+      include: { plan: true },
+    });
+
+    if (!subscription?.plan?.stripePriceId) {
+      return res.status(404).send("Subscription cannot be reactivated online.");
+    }
+
+    const session = await createCheckoutSession({
+      planId: subscription.plan.id,
+      customerEmail: customer.email,
+      customerName: customer.name || undefined,
+      stripeCustomerId: subscription.externalCustomerId || undefined,
+      reactivateSubscriptionId: subscription.id,
+      successUrl: portalAbsoluteUrl(req, "/checkout-success?session_id={CHECKOUT_SESSION_ID}"),
+      cancelUrl: portalAbsoluteUrl(req, "/licenses?status=expired&reactivation_cancelled=1"),
+    });
+
+    if (!session.url || typeof session.url !== "string") {
+      throw new Error("Stripe did not return a reactivation checkout URL.");
+    }
+
+    return res.redirect(303, session.url);
+  } catch (error) { next(error); }
+});
+
 customerPortalRouter.post("/subscriptions/:id/change-plan", async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
-    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe" }, include: { plan: { include: { entitlements: true } } } });
+    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe", complimentary: false, status: { in: ["ACTIVE", "TRIALING"] } }, include: { plan: { include: { entitlements: true } } } });
     if (subscription?.cancelAtPeriodEnd) return res.redirect(portalPath(req, `/subscriptions/${req.params.id}/manage`));
     const targetPlanId = String(req.body.plan_id || "");
     const targetPlan = targetPlanId ? await prisma.plan.findFirst({ where: { id: targetPlanId, productId: subscription?.productId, active: true, stripePriceId: { not: null } }, include: { entitlements: true } }) : null;
@@ -781,7 +1041,7 @@ customerPortalRouter.post("/subscriptions/:id/cancel-scheduled-change", async (r
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
-    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe" } });
+    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe", complimentary: false, status: { in: ["ACTIVE", "TRIALING"] } } });
     if (!subscription?.externalSubscriptionId) return res.status(404).send("Subscription unavailable.");
     await cancelStripeSubscriptionPlanChange(subscription.externalSubscriptionId);
     return res.redirect(`${portalPath(req, `/subscriptions/${subscription.id}/manage`)}?schedule_cancelled=1`);
@@ -792,7 +1052,7 @@ customerPortalRouter.post("/subscriptions/:id/keep", async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
-    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe" } });
+    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe", complimentary: false, status: { in: ["ACTIVE", "TRIALING"] }, cancelAtPeriodEnd: true } });
     if (!subscription?.externalSubscriptionId) return res.status(404).send("Subscription unavailable.");
     await resumeStripeSubscription(subscription.externalSubscriptionId);
     return res.redirect(`${portalPath(req, `/subscriptions/${subscription.id}/manage`)}?kept=1`);
@@ -803,7 +1063,7 @@ customerPortalRouter.post("/subscriptions/:id/payment-method", async (req, res, 
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
-    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe" } });
+    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe", complimentary: false, status: { in: ["ACTIVE", "TRIALING", "PAST_DUE"] } } });
     if (!subscription?.externalCustomerId) return res.status(404).send("Subscription unavailable.");
     const session = await createPaymentMethodPortalSession({ customerId: subscription.externalCustomerId, returnUrl: portalAbsoluteUrl(req, `/subscriptions/${subscription.id}/manage?payment_updated=1`) });
     if (!session.url || typeof session.url !== "string") throw new Error("Stripe did not return a payment-method URL.");
@@ -815,7 +1075,7 @@ customerPortalRouter.post("/subscriptions/:id/cancel", async (req, res, next) =>
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
-    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe" } });
+    const subscription = await prisma.subscription.findFirst({ where: { id: req.params.id, customerId: customer.id, externalProvider: "stripe", complimentary: false, status: { in: ["ACTIVE", "TRIALING"] }, cancelAtPeriodEnd: false } });
     if (!subscription?.externalCustomerId || !subscription.externalSubscriptionId) return res.status(404).send("Subscription unavailable.");
     await cancelStripeSubscriptionPlanChange(subscription.externalSubscriptionId).catch((error) => {
       if (error instanceof Error && error.message.includes("not created by RWExec")) throw error;
@@ -826,7 +1086,7 @@ customerPortalRouter.post("/subscriptions/:id/cancel", async (req, res, next) =>
   } catch (error) { next(error); }
 });
 
-customerPortalRouter.post("/request-link", async (req, res, next) => {
+customerPortalRouter.post("/request-link", magicLinkLimiter, async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
     const customer = email ? await prisma.customer.findUnique({ where: { email } }) : null;
@@ -852,16 +1112,59 @@ customerPortalRouter.post("/logout", (req, res) => {
   return res.redirect(portalPath(req));
 });
 
-customerPortalRouter.post("/licenses/:id/reveal", async (req, res, next) => {
+customerPortalRouter.post("/licenses/:id/reveal", licenceRevealLimiter, async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
-    const licence = await prisma.license.findFirst({ where: { id: req.params.id, customerId: customer.id }, include: { product: true, subscription: { include: { product: true, plan: true } } } });
+    const licenceIdParam = req.params.id;
+    const licenceId = Array.isArray(licenceIdParam) ? licenceIdParam[0] : licenceIdParam;
+    if (!licenceId) return res.status(400).send("Licence ID is required.");
+
+    const licence = await prisma.license.findFirst({
+      where: { id: licenceId, customerId: customer.id }
+    });
     if (!licence) return res.status(404).send("Licence not found.");
+
+    const product = await prisma.product.findUnique({ where: { id: licence.productId } });
+    if (!product) return res.status(404).send("Licence product not found.");
+
+    const subscription = licence.subscriptionId
+      ? await prisma.subscription.findFirst({
+          where: { id: licence.subscriptionId, customerId: customer.id }
+        })
+      : null;
+
+    const subscriptionProduct = subscription
+      ? await prisma.product.findUnique({ where: { id: subscription.productId } })
+      : null;
+    const subscriptionPlan = subscription?.planId
+      ? await prisma.plan.findUnique({ where: { id: subscription.planId } })
+      : null;
+
     const rawKey = await revealLicenceKey(licence.id, customer.id);
     if (!rawKey) return res.status(409).send(appShell(req, "Licence unavailable", "licenses", customer, `<div class="page-head"><div><h1>Licence key unavailable</h1><p>The full key is not stored for this older licence. The licence itself is unchanged and can continue working on existing sites.</p></div></div><section class="account-card"><div class="notice info"><strong>Need the full key?</strong>Contact RWExec if you need this licence regenerated. Regeneration would replace the existing key, so it should only be used when necessary.</div><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></section>`));
-    const label = licence.subscription ? subscriptionDisplayName({ label: licence.subscription.label, product: licence.subscription.product, plan: licence.subscription.plan }) : licence.product.name;
+
+    const label = subscription && subscriptionProduct
+      ? subscriptionDisplayName({
+          label: subscription.label,
+          product: subscriptionProduct,
+          plan: subscriptionPlan
+        })
+      : product.name;
     const safeRawKey = escapeHtml(rawKey);
-    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(licence.product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key" disabled aria-disabled="true">Copy key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script src="${portalPath(req, "/assets/licence-key.js")}" defer></script>`));
+    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key" disabled aria-disabled="true">Copy key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script src="${portalPath(req, "/assets/licence-key.js")}" defer></script>`));
   } catch (error) { next(error); }
+});
+
+customerPortalRouter.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const requestId = String(res.locals.requestId || "unknown");
+  console.error(`[${requestId}] Customer portal error:`, error);
+
+  if (res.headersSent) return;
+
+  res.status(500).send(publicShell(
+    req,
+    "Something went wrong",
+    `<section class="account-login__card">${logoBlock(req)}<h1>We couldn’t complete that request</h1><p class="muted">Please try again. If it keeps happening, give RWExec this reference so we can trace the error.</p><div class="secret" style="margin:16px 0;font-size:14px">${escapeHtml(requestId)}</div><a class="button primary" href="${portalPath(req)}">Back to your account</a></section>`,
+  ));
 });

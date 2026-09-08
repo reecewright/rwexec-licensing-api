@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import express from "express";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
@@ -6,25 +7,20 @@ import { adminWebRouter } from "./routes/admin-web-routes.js";
 import { licenseRouter } from "./routes/license-routes.js";
 import { stripeWebhookRouter } from "./routes/stripe-routes.js";
 import { customerPortalRouter } from "./routes/customer-portal-routes.js";
-import { checkoutRouter } from "./routes/checkout-routes.js";
 
 export const app = express();
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        "form-action": [
-          "'self'",
-          "https://billing.stripe.com",
-        ],
-      },
-    },
-  }),
-);
+app.use((req, res, next) => {
+  const requestId = String(req.header("x-request-id") || "").trim().slice(0, 80) || crypto.randomUUID();
+  res.locals.requestId = requestId;
+  res.setHeader("x-request-id", requestId);
+  next();
+});
+
+app.use(helmet());
 
 // Stripe must receive the exact raw request body so webhook signatures can be verified.
 app.use("/v1/stripe", stripeWebhookRouter);
@@ -36,72 +32,47 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "rwexec-licensing-api" });
 });
 
-const customerPortalLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 30,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-});
-
-app.use((req, res, next) => {
-  if (req.hostname === "account.rwexec.com") {
-    return customerPortalLimiter(req, res, () =>
-      customerPortalRouter(req, res, next),
-    );
-  }
-
-  next();
-});
-
-app.use("/account", customerPortalLimiter, customerPortalRouter);
-
-const adminWebLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 120,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-});
-
-app.use((req, res, next) => {
-  if (req.hostname === "admin.rwexec.com") {
-    return adminWebLimiter(req, res, () =>
-      adminWebRouter(req, res, next),
-    );
-  }
-
-  return next();
-});
-
-app.use("/admin", (req, res, next) => {
-  if (req.hostname === "admin.rwexec.com") {
-    return next();
-  }
-
-  return adminWebLimiter(req, res, () =>
-    adminWebRouter(req, res, next),
-  );
-});
-
+// Normal account navigation can generate several requests at once (HTML, CSS, logo, favicon).
+// Sensitive account actions have tighter route-level limits inside customer-portal-routes.ts.
 app.use(
-  "/checkout",
+  "/account",
   rateLimit({
     windowMs: 60_000,
-    limit: 30,
+    limit: 120,
     standardHeaders: "draft-8",
     legacyHeaders: false,
   }),
-  checkoutRouter,
+  customerPortalRouter,
 );
 
-app.use("/v1/licenses", rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }), licenseRouter);
+app.use(
+  "/admin",
+  rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }),
+  adminWebRouter,
+);
 
-app.use("/v1/admin", rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }), adminRouter);
+app.use(
+  "/v1/licenses",
+  rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }),
+  licenseRouter,
+);
+
+app.use(
+  "/v1/admin",
+  rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }),
+  adminRouter,
+);
 
 app.use((_req, res) => {
   res.status(404).json({ error: "not_found" });
 });
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(error);
-  res.status(500).json({ error: "server_error", message: "An unexpected server error occurred." });
+  const requestId = String(res.locals.requestId || "unknown");
+  console.error(`[${requestId}]`, error);
+  res.status(500).json({
+    error: "server_error",
+    message: "An unexpected server error occurred.",
+    request_id: requestId,
+  });
 });

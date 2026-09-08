@@ -6,7 +6,6 @@ import { config } from "../config.js";
 const PORTAL_COOKIE = "rwexec_customer_session";
 const PORTAL_SESSION_SECONDS = 60 * 60 * 24 * 7;
 const MAGIC_LINK_MINUTES = 30;
-const DELIVERY_DAYS = 7;
 
 function deriveKey(label: string) {
   return crypto
@@ -116,11 +115,7 @@ export function customerIdFromCookie(cookieHeader?: string) {
   return safeEqual(signature, signSession(payload)) ? customerId : null;
 }
 
-export async function storeLicenceDelivery(
-  licenseId: string,
-  customerId: string,
-  rawKey: string,
-) {
+function encryptLicenceKey(rawKey: string) {
   const key = deriveKey("licence-delivery");
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -128,95 +123,89 @@ export async function storeLicenceDelivery(
     cipher.update(rawKey, "utf8"),
     cipher.final(),
   ]);
-  const authTag = cipher.getAuthTag();
 
-  // This date remains as the original delivery-link window for backwards
-  // compatibility. Authenticated account retrieval is not limited by it.
-  const expiresAt = new Date(
-    Date.now() + DELIVERY_DAYS * 24 * 60 * 60_000,
-  );
-
-  await prisma.licenseDelivery.upsert({
-    where: { licenseId },
-    update: {
-      customerId,
-      ciphertext: ciphertext.toString("base64"),
-      iv: iv.toString("base64"),
-      authTag: authTag.toString("base64"),
-      expiresAt,
-      claimedAt: null,
-    },
-    create: {
-      licenseId,
-      customerId,
-      ciphertext: ciphertext.toString("base64"),
-      iv: iv.toString("base64"),
-      authTag: authTag.toString("base64"),
-      expiresAt,
-    },
-  });
+  return {
+    ciphertext: ciphertext.toString("base64"),
+    iv: iv.toString("base64"),
+    authTag: cipher.getAuthTag().toString("base64"),
+  };
 }
 
-function decryptStoredLicenceKey(delivery: {
+function decryptStoredLicenceKey(secret: {
   ciphertext: string;
   iv: string;
   authTag: string;
 }) {
-  if (!delivery.ciphertext || !delivery.iv || !delivery.authTag) return null;
+  if (!secret.ciphertext || !secret.iv || !secret.authTag) return null;
 
   const key = deriveKey("licence-delivery");
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
     key,
-    Buffer.from(delivery.iv, "base64"),
+    Buffer.from(secret.iv, "base64"),
   );
-  decipher.setAuthTag(Buffer.from(delivery.authTag, "base64"));
+  decipher.setAuthTag(Buffer.from(secret.authTag, "base64"));
 
   return Buffer.concat([
-    decipher.update(Buffer.from(delivery.ciphertext, "base64")),
+    decipher.update(Buffer.from(secret.ciphertext, "base64")),
     decipher.final(),
   ]).toString("utf8");
 }
 
 /**
- * Reveal a licence key to its authenticated customer.
+ * Persist the encrypted plaintext licence key for authenticated retrieval.
  *
- * The encrypted key is intentionally retained so it can be revealed again
- * later from the secure RWExec account. `claimedAt` now records the first
- * successful reveal only; it no longer destroys the encrypted copy.
- *
- * Existing legacy delivery rows whose ciphertext was already erased by the
- * previous one-time-claim behaviour cannot be recovered from the key hash.
+ * The underlying Prisma model is still named LicenseDelivery for backwards
+ * compatibility with the existing production database, but it is now treated
+ * as permanent encrypted secret storage. The legacy expiresAt/claimedAt fields
+ * are retained only so this release does not require a risky data migration.
  */
+export async function storeLicenceSecret(
+  licenseId: string,
+  customerId: string,
+  rawKey: string,
+) {
+  const encrypted = encryptLicenceKey(rawKey);
+
+  // The legacy column is no longer used to decide whether a key can be revealed.
+  // Give it a long compatibility value rather than preserving the old 7-day rule.
+  const compatibilityExpiresAt = new Date("9999-12-31T23:59:59.000Z");
+
+  await prisma.licenseDelivery.upsert({
+    where: { licenseId },
+    update: {
+      customerId,
+      ...encrypted,
+      expiresAt: compatibilityExpiresAt,
+      claimedAt: null,
+    },
+    create: {
+      licenseId,
+      customerId,
+      ...encrypted,
+      expiresAt: compatibilityExpiresAt,
+    },
+  });
+}
+
 export async function revealLicenceKey(licenseId: string, customerId: string) {
-  const delivery = await prisma.licenseDelivery.findUnique({
+  const secret = await prisma.licenseDelivery.findUnique({
     where: { licenseId },
   });
 
-  if (!delivery || delivery.customerId !== customerId) return null;
+  if (!secret || secret.customerId !== customerId) return null;
 
-  let rawKey: string | null = null;
   try {
-    rawKey = decryptStoredLicenceKey(delivery);
+    return decryptStoredLicenceKey(secret);
   } catch {
     return null;
   }
-
-  if (!rawKey) return null;
-
-  if (!delivery.claimedAt) {
-    await prisma.licenseDelivery.update({
-      where: { id: delivery.id },
-      data: { claimedAt: new Date() },
-    });
-  }
-
-  return rawKey;
 }
 
-// Backwards-compatible export for any older route still importing this name.
-// It now uses the persistent authenticated reveal behaviour and does NOT erase
-// ciphertext.
+// Compatibility exports for older route/service files while the codebase is
+// transitioned from the old one-time “delivery” terminology. Neither function
+// destroys the encrypted key or applies the old delivery expiry.
+export const storeLicenceDelivery = storeLicenceSecret;
 export async function claimLicenceDelivery(
   licenseId: string,
   customerId: string,

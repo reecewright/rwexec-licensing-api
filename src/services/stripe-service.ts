@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { SubscriptionStatus } from "@prisma/client";
+import type { Subscription, SubscriptionStatus } from "@prisma/client";
 import { prisma } from "../db.js";
 import { config } from "../config.js";
 import { generateLicenseKey, hashLicenseKey } from "../utils/license-key.js";
@@ -58,6 +58,8 @@ export async function createCheckoutSession(input: {
   planId: string;
   customerEmail?: string;
   customerName?: string;
+  stripeCustomerId?: string;
+  reactivateSubscriptionId?: string;
   successUrl: string;
   cancelUrl: string;
 }) {
@@ -84,7 +86,24 @@ export async function createCheckoutSession(input: {
     "subscription_data[metadata][rwexec_product_slug]",
     plan.product.slug,
   );
-  if (input.customerEmail) params.set("customer_email", input.customerEmail);
+
+  if (input.reactivateSubscriptionId) {
+    params.set(
+      "metadata[rwexec_reactivate_subscription_id]",
+      input.reactivateSubscriptionId,
+    );
+    params.set(
+      "subscription_data[metadata][rwexec_reactivate_subscription_id]",
+      input.reactivateSubscriptionId,
+    );
+  }
+
+  if (input.stripeCustomerId) {
+    params.set("customer", input.stripeCustomerId);
+  } else if (input.customerEmail) {
+    params.set("customer_email", input.customerEmail);
+  }
+
   if (input.customerName)
     params.set("metadata[rwexec_customer_name]", input.customerName);
 
@@ -729,7 +748,10 @@ async function ensureSubscriptionLicence(subscriptionId: string) {
   return licence;
 }
 
-export async function syncStripeSubscription(subscriptionObject: StripeObject) {
+export async function syncStripeSubscription(
+  subscriptionObject: StripeObject,
+  options: { reactivateSubscriptionId?: string } = {},
+) {
   const externalSubscriptionId = asId(subscriptionObject.id);
   const externalCustomerId = asId(subscriptionObject.customer);
   const priceId = stripePriceId(subscriptionObject);
@@ -757,37 +779,139 @@ export async function syncStripeSubscription(subscriptionObject: StripeObject) {
   const status = mapStripeSubscriptionStatus(subscriptionObject.status);
   const currentPeriodEnd = stripeCurrentPeriodEnd(subscriptionObject);
   const cancelAtPeriodEnd =
-  Boolean(subscriptionObject.cancel_at_period_end) ||
-  asDateFromUnix(subscriptionObject.cancel_at) !== null;
+    Boolean(subscriptionObject.cancel_at_period_end) ||
+    asDateFromUnix(subscriptionObject.cancel_at) !== null;
 
-  const subscription = await prisma.subscription.upsert({
+  const previous = await prisma.subscription.findUnique({
     where: { externalSubscriptionId },
-    update: {
-      customerId: customer.id,
-      productId: plan.productId,
-      planId: plan.id,
-      status,
-      complimentary: false,
-      externalProvider: "stripe",
-      externalCustomerId,
-      currentPeriodEnd,
-      cancelAtPeriodEnd,
-    },
-    create: {
-      customerId: customer.id,
-      productId: plan.productId,
-      planId: plan.id,
-      status,
-      complimentary: false,
-      externalProvider: "stripe",
-      externalCustomerId,
-      externalSubscriptionId,
-      currentPeriodEnd,
-      cancelAtPeriodEnd,
-    },
   });
 
+  let subscription: Subscription | undefined;
+  const metadataReactivationId =
+    typeof subscriptionObject?.metadata?.rwexec_reactivate_subscription_id === "string"
+      ? subscriptionObject.metadata.rwexec_reactivate_subscription_id.trim()
+      : "";
+  const reactivationId =
+    options.reactivateSubscriptionId?.trim() || metadataReactivationId || null;
+
+  if (reactivationId && !previous) {
+    const candidate = await prisma.subscription.findFirst({
+      where: {
+        id: reactivationId,
+        customerId: customer.id,
+        productId: plan.productId,
+        complimentary: false,
+        status: { in: ["CANCELED", "EXPIRED"] },
+      },
+    });
+
+    if (candidate) {
+      subscription = await prisma.subscription.update({
+        where: { id: candidate.id },
+        data: {
+          planId: plan.id,
+          status,
+          externalProvider: "stripe",
+          externalCustomerId,
+          externalSubscriptionId,
+          currentPeriodEnd,
+          cancelAtPeriodEnd,
+        },
+      });
+
+      const existingLicence = await prisma.license.findUnique({
+        where: { subscriptionId: candidate.id },
+      });
+      if (existingLicence && ["EXPIRED", "SUSPENDED"].includes(existingLicence.status)) {
+        await prisma.license.update({
+          where: { id: existingLicence.id },
+          data: { status: "ACTIVE", expiresAt: null },
+        });
+      }
+
+      await writeAudit({
+        action: "subscription.reactivated",
+        entityType: "subscription",
+        entityId: candidate.id,
+        summary: "Customer reactivated an expired subscription",
+        metadata: {
+          previousExternalSubscriptionId: candidate.externalSubscriptionId,
+          externalSubscriptionId,
+          planId: plan.id,
+        },
+      });
+    }
+  }
+
+  if (!subscription) {
+    subscription = await prisma.subscription.upsert({
+      where: { externalSubscriptionId },
+      update: {
+        customerId: customer.id,
+        productId: plan.productId,
+        planId: plan.id,
+        status,
+        complimentary: false,
+        externalProvider: "stripe",
+        externalCustomerId,
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+      },
+      create: {
+        customerId: customer.id,
+        productId: plan.productId,
+        planId: plan.id,
+        status,
+        complimentary: false,
+        externalProvider: "stripe",
+        externalCustomerId,
+        externalSubscriptionId,
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+      },
+    });
+  }
+
   await ensureSubscriptionLicence(subscription.id);
+
+  if (previous && previous.id === subscription.id) {
+    if (previous.planId !== plan.id) {
+      await writeAudit({
+        action: "subscription.plan_changed",
+        entityType: "subscription",
+        entityId: subscription.id,
+        summary: "Subscription plan changed",
+        metadata: { previousPlanId: previous.planId, planId: plan.id },
+      });
+    }
+    if (!previous.cancelAtPeriodEnd && cancelAtPeriodEnd) {
+      await writeAudit({
+        action: "subscription.cancellation_scheduled",
+        entityType: "subscription",
+        entityId: subscription.id,
+        summary: "Subscription cancellation scheduled",
+        metadata: { currentPeriodEnd: currentPeriodEnd?.toISOString() ?? null },
+      });
+    }
+    if (previous.cancelAtPeriodEnd && !cancelAtPeriodEnd) {
+      await writeAudit({
+        action: "subscription.cancellation_reversed",
+        entityType: "subscription",
+        entityId: subscription.id,
+        summary: "Subscription cancellation reversed",
+      });
+    }
+    if (previous.status !== status) {
+      await writeAudit({
+        action: "subscription.status_changed",
+        entityType: "subscription",
+        entityId: subscription.id,
+        summary: `Subscription status changed to ${status.toLowerCase()}`,
+        metadata: { previousStatus: previous.status, status },
+      });
+    }
+  }
+
   return subscription;
 }
 
@@ -823,7 +947,18 @@ export async function processStripeEvent(event: StripeObject) {
       const subscriptionId = asId(object.subscription);
       if (!subscriptionId)
         return { processed: false, reason: "missing_subscription" };
-      await fetchAndSyncStripeSubscription(subscriptionId);
+
+      const reactivationId =
+        typeof object?.metadata?.rwexec_reactivate_subscription_id === "string"
+          ? object.metadata.rwexec_reactivate_subscription_id
+          : undefined;
+
+      const subscriptionObject = await stripeRequest(
+        `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      );
+      await syncStripeSubscription(subscriptionObject, {
+        reactivateSubscriptionId: reactivationId,
+      });
       return { processed: true };
     }
     case "customer.subscription.created":
