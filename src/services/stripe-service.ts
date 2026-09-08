@@ -364,6 +364,133 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
   }
 }
 
+
+function stripeScheduleIsRwexecManaged(schedule: StripeObject) {
+  const scheduleMetadataManaged =
+    String(schedule?.metadata?.rwexec_managed_plan_change ?? "") === "1";
+  const phaseMetadataManaged = Array.isArray(schedule?.phases)
+    ? schedule.phases.some(
+        (phase: StripeObject) =>
+          String(phase?.metadata?.rwexec_scheduled_plan_change ?? "") === "1",
+      )
+    : false;
+
+  return scheduleMetadataManaged || phaseMetadataManaged;
+}
+
+export async function getStripeSubscriptionPlanChange(subscriptionId: string) {
+  const subscription = await stripeRequest(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
+  const scheduleId = asId(subscription.schedule);
+  if (!scheduleId) return null;
+
+  const schedule = await stripeRequest(
+    `/subscription_schedules/${encodeURIComponent(scheduleId)}`,
+  );
+
+  if (!stripeScheduleIsRwexecManaged(schedule)) return null;
+
+  const currentPhase = schedule?.current_phase as StripeObject | undefined;
+  const currentPhaseEnd =
+    typeof currentPhase?.end_date === "number"
+      ? currentPhase.end_date
+      : (schedule?.phases?.[0] as StripeObject | undefined)?.end_date;
+
+  const phases = Array.isArray(schedule?.phases)
+    ? (schedule.phases as StripeObject[])
+    : [];
+  const targetPhase = phases.find(
+    (phase) =>
+      String(phase?.metadata?.rwexec_scheduled_plan_change ?? "") === "1",
+  ) ?? phases[1];
+  const targetPriceId = asId(targetPhase?.items?.[0]?.price);
+
+  if (!targetPriceId) return null;
+
+  return {
+    scheduleId,
+    targetPriceId,
+    effectiveAt:
+      typeof currentPhaseEnd === "number"
+        ? new Date(currentPhaseEnd * 1000)
+        : null,
+  };
+}
+
+export async function cancelStripeSubscriptionPlanChange(
+  subscriptionId: string,
+) {
+  const subscription = await stripeRequest(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+  );
+  const scheduleId = asId(subscription.schedule);
+  if (!scheduleId) return { changed: false };
+
+  const schedule = await stripeRequest(
+    `/subscription_schedules/${encodeURIComponent(scheduleId)}`,
+  );
+  if (!stripeScheduleIsRwexecManaged(schedule)) {
+    throw new Error(
+      "This subscription schedule was not created by RWExec and cannot be removed automatically.",
+    );
+  }
+
+  await stripeRequest(
+    `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`,
+    { method: "POST" },
+  );
+
+  await writeAudit({
+    action: "stripe.subscription_plan_change_cancelled",
+    entityType: "stripe_subscription",
+    entityId: subscriptionId,
+    summary: "Scheduled RWExec subscription plan change cancelled",
+    metadata: { scheduleId },
+  });
+
+  return { changed: true, scheduleId };
+}
+
+export async function resumeStripeSubscription(subscriptionId: string) {
+  const params = new URLSearchParams();
+  params.set("cancel_at_period_end", "false");
+  params.set("cancel_at", "");
+
+  const subscription = await stripeRequest(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+  );
+
+  await syncStripeSubscription(subscription);
+  await writeAudit({
+    action: "stripe.subscription_cancellation_reversed",
+    entityType: "stripe_subscription",
+    entityId: subscriptionId,
+    summary: "Scheduled Stripe subscription cancellation reversed",
+  });
+
+  return subscription;
+}
+
+export async function updateStripeCustomerEmail(
+  customerId: string,
+  email: string,
+) {
+  const params = new URLSearchParams();
+  params.set("email", email);
+
+  return stripeRequest(`/customers/${encodeURIComponent(customerId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+}
+
 export function verifyStripeSignature(
   rawBody: Buffer,
   signatureHeader: string | undefined,

@@ -43,15 +43,17 @@ model Product {
 }
 
 model Customer {
-  id            String            @id @default(cuid())
-  name          String?
-  email         String            @unique
-  billingEmail  String?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  licenses      License[]
-  subscriptions Subscription[]
-  portalTokens  CustomerPortalToken[]
+  id                String                     @id @default(cuid())
+  name              String?
+  companyName       String?
+  email             String                     @unique
+  billingEmail      String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  licenses          License[]
+  subscriptions     Subscription[]
+  portalTokens      CustomerPortalToken[]
+  emailChangeTokens CustomerEmailChangeToken[]
 }
 
 model Plan {
@@ -64,7 +66,7 @@ model Plan {
   priceMinor      Int?
   currency        String            @default("GBP")
   stripeProductId String?
-  stripePriceId   String?            @unique
+  stripePriceId   String?           @unique
   active          Boolean           @default(true)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -99,6 +101,7 @@ model Subscription {
   customerId             String
   productId              String
   planId                 String?
+  label                  String?
   status                 SubscriptionStatus @default(ACTIVE)
   complimentary          Boolean            @default(false)
   externalProvider       String?
@@ -211,6 +214,21 @@ model CustomerPortalToken {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId, expiresAt])
+}
+
+model CustomerEmailChangeToken {
+  id         String   @id @default(cuid())
+  customerId String
+  newEmail   String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, expiresAt])
+  @@index([newEmail])
 }
 
 model LicenseDelivery {
