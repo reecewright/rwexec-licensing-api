@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import express from "express";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
+
 import { adminRouter } from "./routes/admin-routes.js";
 import { adminWebRouter } from "./routes/admin-web-routes.js";
 import { licenseRouter } from "./routes/license-routes.js";
@@ -14,65 +15,133 @@ app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
 app.use((req, res, next) => {
-  const requestId = String(req.header("x-request-id") || "").trim().slice(0, 80) || crypto.randomUUID();
+  const requestId =
+    String(req.header("x-request-id") || "").trim().slice(0, 80) ||
+    crypto.randomUUID();
+
   res.locals.requestId = requestId;
   res.setHeader("x-request-id", requestId);
+
   next();
 });
 
 app.use(helmet());
 
-// Stripe must receive the exact raw request body so webhook signatures can be verified.
+// Stripe must receive the exact raw request body so webhook
+// signatures can be verified.
 app.use("/v1/stripe", stripeWebhookRouter);
 
 app.use(express.json({ limit: "64kb" }));
 app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "rwexec-licensing-api" });
+  res.json({
+    ok: true,
+    service: "rwexec-licensing-api",
+  });
 });
 
-// Normal account navigation can generate several requests at once (HTML, CSS, logo, favicon).
-// Sensitive account actions have tighter route-level limits inside customer-portal-routes.ts.
+const accountRateLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+
+/*
+ * Customer account domain
+ *
+ * account.rwexec.com should expose the customer portal directly
+ * from the root:
+ *
+ *   https://account.rwexec.com/
+ *   https://account.rwexec.com/subscriptions
+ *   https://account.rwexec.com/licenses
+ *
+ * rather than requiring /account in the URL.
+ */
+const accountHostRouter = express.Router();
+
+accountHostRouter.use(
+  accountRateLimiter,
+  customerPortalRouter,
+);
+
+app.use((req, res, next) => {
+  const hostname = req.hostname.toLowerCase();
+
+  if (hostname === "account.rwexec.com") {
+    return accountHostRouter(req, res, next);
+  }
+
+  next();
+});
+
+/*
+ * Keep /account available on the API domain as a fallback.
+ */
 app.use(
   "/account",
+  accountRateLimiter,
+  customerPortalRouter,
+);
+
+app.use(
+  "/admin",
   rateLimit({
     windowMs: 60_000,
     limit: 120,
     standardHeaders: "draft-8",
     legacyHeaders: false,
   }),
-  customerPortalRouter,
-);
-
-app.use(
-  "/admin",
-  rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }),
   adminWebRouter,
 );
 
 app.use(
   "/v1/licenses",
-  rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }),
+  rateLimit({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  }),
   licenseRouter,
 );
 
 app.use(
   "/v1/admin",
-  rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false }),
+  rateLimit({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  }),
   adminRouter,
 );
 
 app.use((_req, res) => {
-  res.status(404).json({ error: "not_found" });
-});
-
-app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const requestId = String(res.locals.requestId || "unknown");
-  console.error(`[${requestId}]`, error);
-  res.status(500).json({
-    error: "server_error",
-    message: "An unexpected server error occurred.",
-    request_id: requestId,
+  res.status(404).json({
+    error: "not_found",
   });
 });
+
+app.use(
+  (
+    error: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    const requestId = String(
+      res.locals.requestId || "unknown",
+    );
+
+    console.error(`[${requestId}]`, error);
+
+    res.status(500).json({
+      error: "server_error",
+      message: "An unexpected server error occurred.",
+      request_id: requestId,
+    });
+  },
+);
