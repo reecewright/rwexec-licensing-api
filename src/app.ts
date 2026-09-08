@@ -26,7 +26,19 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "form-action": [
+          "'self'",
+          "https://billing.stripe.com",
+          "https://checkout.stripe.com",
+        ],
+      },
+    },
+  }),
+);
 
 // Stripe must receive the exact raw request body so webhook
 // signatures can be verified.
