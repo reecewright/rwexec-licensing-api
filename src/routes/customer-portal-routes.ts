@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { adminCss } from "../admin/styles.js";
 import { escapeHtml } from "../admin/html.js";
 import {
-  claimLicenceDelivery,
+  revealLicenceKey,
   clearCustomerSession,
   consumePortalMagicLink,
   customerIdFromCookie,
@@ -361,17 +361,22 @@ async function loadCustomerSubscriptions(customerId: string) {
 }
 
 function licenceDeliveryText(licence: {
-  delivery: { claimedAt: Date | null; expiresAt: Date } | null;
+  delivery: { ciphertext: string; iv: string; authTag: string } | null;
 }) {
-  const canClaim = Boolean(
-    licence.delivery && !licence.delivery.claimedAt && licence.delivery.expiresAt > new Date(),
+  const canReveal = Boolean(
+    licence.delivery?.ciphertext &&
+      licence.delivery.iv &&
+      licence.delivery.authTag,
   );
-  if (licence.delivery?.claimedAt) return { canClaim: false, text: "Key already collected" };
-  if (licence.delivery && licence.delivery.expiresAt <= new Date()) {
-    return { canClaim: false, text: "Delivery link expired — contact support" };
+
+  if (canReveal) {
+    return { canReveal: true, text: "Secure key available" };
   }
-  if (canClaim) return { canClaim: true, text: "Ready to collect" };
-  return { canClaim: false, text: "Licence delivery is unavailable — contact support if you need the key" };
+
+  return {
+    canReveal: false,
+    text: "Full key is not stored for this older licence — contact RWExec if you need it regenerated",
+  };
 }
 
 function subscriptionCard(req: Request, subscription: Awaited<ReturnType<typeof loadCustomerSubscriptions>>[number]) {
@@ -414,7 +419,7 @@ function subscriptionCard(req: Request, subscription: Awaited<ReturnType<typeof 
         ${licence ? `<div><strong>Licence •••• ${escapeHtml(licence.keyLastFour)}</strong><span>${licence.activations.length} / ${licence.activationLimit} sites activated</span></div><div><strong>Licence status</strong><span>${escapeHtml(licence.status.toLowerCase())} · ${escapeHtml(delivery?.text || "")}</span></div>` : `<div><strong>Licence</strong><span>No licence linked yet</span></div>`}
       </div>
       <div class="actions">
-        ${licence && delivery?.canClaim ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button secondary" type="submit">Reveal licence key</button></form>` : ""}
+        ${licence && delivery?.canReveal ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button secondary" type="submit">Reveal licence key</button></form>` : ""}
         <a class="button primary" href="${portalPath(req, `/subscriptions/${subscription.id}/manage`)}">Manage subscription</a>
       </div>
     </div>
@@ -530,7 +535,7 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
     const deactivated = req.query.deactivated === "1" ? `<div class="notice success"><strong>Site deactivated</strong>That activation slot is now available to use again.</div>` : "";
     const cards = subscriptions.flatMap((subscription) => subscription.licenses.map((licence) => {
       const delivery = licenceDeliveryText(licence);
-      return `<section class="account-card"><div class="card-head"><div><div class="eyebrow">${escapeHtml(subscriptionDisplayName(subscription))}</div><h2>${escapeHtml(subscription.product.name)} licence</h2><div class="subscription-meta"><span>•••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length} / ${licence.activationLimit} sites</span><span>${escapeHtml(licence.status.toLowerCase())}</span></div></div>${delivery.canClaim ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button primary" type="submit">Reveal licence key</button></form>` : ""}</div><div class="muted small">${escapeHtml(delivery.text)}</div><div class="site-list">${licence.activations.length ? licence.activations.map((activation) => `<div class="site-row"><div><div class="site-row__url">${escapeHtml(activation.siteUrl)}</div><div class="site-row__meta">Activated ${escapeHtml(shortDate(activation.activatedAt))}${activation.pluginVersion ? ` · Plugin ${escapeHtml(activation.pluginVersion)}` : ""}</div></div><form method="post" action="${portalPath(req, `/activations/${activation.id}/deactivate`)}"><button class="button secondary" type="submit">Deactivate</button></form></div>`).join("") : `<div class="empty-state" style="padding:20px">No active sites on this licence.</div>`}</div></section>`;
+      return `<section class="account-card"><div class="card-head"><div><div class="eyebrow">${escapeHtml(subscriptionDisplayName(subscription))}</div><h2>${escapeHtml(subscription.product.name)} licence</h2><div class="subscription-meta"><span>•••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length} / ${licence.activationLimit} sites</span><span>${escapeHtml(licence.status.toLowerCase())}</span></div></div>${delivery.canReveal ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button primary" type="submit">Reveal licence key</button></form>` : ""}</div><div class="muted small">${escapeHtml(delivery.text)}</div><div class="site-list">${licence.activations.length ? licence.activations.map((activation) => `<div class="site-row"><div><div class="site-row__url">${escapeHtml(activation.siteUrl)}</div><div class="site-row__meta">Activated ${escapeHtml(shortDate(activation.activatedAt))}${activation.pluginVersion ? ` · Plugin ${escapeHtml(activation.pluginVersion)}` : ""}</div></div><form method="post" action="${portalPath(req, `/activations/${activation.id}/deactivate`)}"><button class="button secondary" type="submit">Deactivate</button></form></div>`).join("") : `<div class="empty-state" style="padding:20px">No active sites on this licence.</div>`}</div></section>`;
     }));
     const body = `<div class="page-head"><div><div class="eyebrow">Licences & sites</div><h1>Licence usage</h1><p>See which subscription each licence belongs to and manage the websites using its activation allowance.</p></div></div>${deactivated}${cards.join("") || `<section class="account-card empty-state">No licences yet.</section>`}`;
     return res.send(appShell(req, "Licences & sites", "licenses", customer, body));
@@ -804,9 +809,10 @@ customerPortalRouter.post("/licenses/:id/reveal", async (req, res, next) => {
     if (!customer) return res.redirect(portalPath(req));
     const licence = await prisma.license.findFirst({ where: { id: req.params.id, customerId: customer.id }, include: { product: true, subscription: { include: { product: true, plan: true } } } });
     if (!licence) return res.status(404).send("Licence not found.");
-    const rawKey = await claimLicenceDelivery(licence.id, customer.id);
-    if (!rawKey) return res.status(409).send(appShell(req, "Licence unavailable", "licenses", customer, `<div class="page-head"><div><h1>Licence key unavailable</h1><p>This key has already been collected or its delivery window has expired.</p></div></div><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a>`));
+    const rawKey = await revealLicenceKey(licence.id, customer.id);
+    if (!rawKey) return res.status(409).send(appShell(req, "Licence unavailable", "licenses", customer, `<div class="page-head"><div><h1>Licence key unavailable</h1><p>The full key is not stored for this older licence. The licence itself is unchanged and can continue working on existing sites.</p></div></div><section class="account-card"><div class="notice info"><strong>Need the full key?</strong>Contact RWExec if you need this licence regenerated. Regeneration would replace the existing key, so it should only be used when necessary.</div><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></section>`));
     const label = licence.subscription ? subscriptionDisplayName({ label: licence.subscription.label, product: licence.subscription.product, plan: licence.subscription.plan }) : licence.product.name;
-    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(licence.product.name)}</p></div></div><section class="account-card"><div class="notice warning"><strong>Copy this key now</strong>For security, the full key will not be shown again.</div><div class="secret">${escapeHtml(rawKey)}</div><p class="muted">If you lose it later, RWExec can regenerate the key. Regenerating invalidates the previous key.</p><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></section>`));
+    const safeRawKey = escapeHtml(rawKey);
+    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(licence.product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key">Copy key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script>(function(){const key=document.getElementById('licence-key');const toggle=document.getElementById('toggle-licence-key');const copy=document.getElementById('copy-licence-key');const status=document.getElementById('copy-status');if(!key||!toggle||!copy)return;let shown=false;toggle.addEventListener('click',function(){shown=!shown;key.style.filter=shown?'none':'blur(7px)';key.style.userSelect=shown?'text':'none';toggle.textContent=shown?'Hide':'Reveal';});copy.addEventListener('click',async function(){const value=key.getAttribute('data-key')||'';try{await navigator.clipboard.writeText(value);status.textContent='Licence key copied to clipboard.';copy.textContent='Copied';setTimeout(function(){copy.textContent='Copy key';},1800);}catch(e){shown=true;key.style.filter='none';key.style.userSelect='text';toggle.textContent='Hide';status.textContent='Copy was blocked by your browser. The key has been revealed so you can copy it manually.';}});})();</script>`));
   } catch (error) { next(error); }
 });
