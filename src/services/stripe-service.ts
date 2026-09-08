@@ -205,13 +205,6 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
     `/subscriptions/${encodeURIComponent(input.subscriptionId)}`,
   );
 
-  const existingScheduleId = asId(subscription.schedule);
-  if (existingScheduleId) {
-    throw new Error(
-      "This subscription already has a scheduled change. Please contact RWExec support before scheduling another one.",
-    );
-  }
-
   const currentItem = subscription?.items?.data?.[0] as
     | StripeObject
     | undefined;
@@ -229,26 +222,65 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
     throw new Error("The subscription is already on that price.");
   }
 
-  const createParams = new URLSearchParams();
-  createParams.set("from_subscription", input.subscriptionId);
+  const existingScheduleId = asId(subscription.schedule);
+  let schedule: StripeObject;
+  let scheduleId: string;
+  let createdNewSchedule = false;
 
-  const schedule = await stripeRequest("/subscription_schedules", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: createParams.toString(),
-  });
+  if (existingScheduleId) {
+    schedule = await stripeRequest(
+      `/subscription_schedules/${encodeURIComponent(existingScheduleId)}`,
+    );
+    scheduleId = existingScheduleId;
 
-  const scheduleId = asId(schedule.id);
-  const currentPhase = schedule?.phases?.[0] as StripeObject | undefined;
-  const currentPhaseStart = currentPhase?.start_date;
-  const currentPhaseEnd = currentPhase?.end_date;
+    const scheduleMetadataManaged =
+      String(schedule?.metadata?.rwexec_managed_plan_change ?? "") === "1";
+    const phaseMetadataManaged = Array.isArray(schedule?.phases)
+      ? schedule.phases.some(
+          (phase: StripeObject) =>
+            String(phase?.metadata?.rwexec_scheduled_plan_change ?? "") === "1",
+        )
+      : false;
+
+    if (!scheduleMetadataManaged && !phaseMetadataManaged) {
+      throw new Error(
+        "This subscription already has a Stripe schedule that was not created by RWExec, so it cannot be replaced automatically.",
+      );
+    }
+  } else {
+    const createParams = new URLSearchParams();
+    createParams.set("from_subscription", input.subscriptionId);
+
+    schedule = await stripeRequest("/subscription_schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: createParams.toString(),
+    });
+
+    const createdScheduleId = asId(schedule.id);
+    if (!createdScheduleId) {
+      throw new Error("Stripe did not return a subscription schedule ID.");
+    }
+
+    scheduleId = createdScheduleId;
+    createdNewSchedule = true;
+  }
+
+  const currentPhase = schedule?.current_phase as StripeObject | undefined;
+  const currentPhaseStart =
+    typeof currentPhase?.start_date === "number"
+      ? currentPhase.start_date
+      : (schedule?.phases?.[0] as StripeObject | undefined)?.start_date;
+  const currentPhaseEnd =
+    typeof currentPhase?.end_date === "number"
+      ? currentPhase.end_date
+      : (schedule?.phases?.[0] as StripeObject | undefined)?.end_date;
 
   if (
-    !scheduleId ||
     typeof currentPhaseStart !== "number" ||
     typeof currentPhaseEnd !== "number"
   ) {
-    if (scheduleId) {
+    if (createdNewSchedule) {
       try {
         await stripeRequest(
           `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`,
@@ -258,6 +290,7 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
         // Preserve the original error below.
       }
     }
+
     throw new Error(
       "Stripe did not return the current schedule phase needed to defer this plan change.",
     );
@@ -266,6 +299,7 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
   const updateParams = new URLSearchParams();
   updateParams.set("end_behavior", "release");
   updateParams.set("proration_behavior", "none");
+  updateParams.set("metadata[rwexec_managed_plan_change]", "1");
 
   updateParams.set("phases[0][items][0][price]", currentPriceId);
   updateParams.set("phases[0][items][0][quantity]", String(quantity));
@@ -294,10 +328,14 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
     );
 
     await writeAudit({
-      action: "stripe.subscription_plan_change_scheduled",
+      action: existingScheduleId
+        ? "stripe.subscription_plan_change_rescheduled"
+        : "stripe.subscription_plan_change_scheduled",
       entityType: "stripe_subscription",
       entityId: input.subscriptionId,
-      summary: "Stripe subscription plan change scheduled for the next billing period",
+      summary: existingScheduleId
+        ? "Existing RWExec Stripe subscription plan change replaced"
+        : "Stripe subscription plan change scheduled for the next billing period",
       metadata: {
         scheduleId,
         currentPriceId,
@@ -308,17 +346,20 @@ export async function scheduleStripeSubscriptionPlanChange(input: {
 
     return updatedSchedule;
   } catch (error) {
-    try {
-      await stripeRequest(
-        `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`,
-        { method: "POST" },
-      );
-    } catch (releaseError) {
-      console.error(
-        "Could not release Stripe schedule after failed plan-change setup:",
-        releaseError,
-      );
+    if (createdNewSchedule) {
+      try {
+        await stripeRequest(
+          `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`,
+          { method: "POST" },
+        );
+      } catch (releaseError) {
+        console.error(
+          "Could not release Stripe schedule after failed plan-change setup:",
+          releaseError,
+        );
+      }
     }
+
     throw error;
   }
 }
