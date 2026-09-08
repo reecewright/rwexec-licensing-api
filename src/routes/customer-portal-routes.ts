@@ -214,6 +214,15 @@ function baseHead(req: Request, title: string, extraCss = "") {
     .subscription-card { border-left:4px solid var(--rw-orange); }
     .subscription-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .subscription-title h2 { margin:0; font-size:20px; }
+    .subscription-rename { display:inline-block; position:relative; }
+    .subscription-rename > summary { list-style:none; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border:1px solid #d6dce5; border-radius:7px; background:#fff; color:#475569; cursor:pointer; user-select:none; }
+    .subscription-rename > summary::-webkit-details-marker { display:none; }
+    .subscription-rename > summary:hover { background:#f8fafc; color:#111827; border-color:#b8c2d0; }
+    .subscription-rename > summary svg { width:15px; height:15px; display:block; }
+    .subscription-rename[open] > summary { border-color:var(--rw-orange); color:var(--rw-orange); box-shadow:0 0 0 2px rgba(254,107,2,.10); }
+    .subscription-rename__form { position:absolute; z-index:20; top:36px; left:0; display:flex; gap:8px; align-items:center; width:min(440px,calc(100vw - 80px)); padding:10px; background:#fff; border:1px solid #d6dce5; border-radius:10px; box-shadow:0 12px 28px rgba(15,23,42,.14); }
+    .subscription-rename__form input { flex:1 1 auto; min-width:0; }
+    .subscription-rename__form .button { flex:0 0 auto; white-space:nowrap; }
     .subscription-meta { display:flex; gap:8px 18px; flex-wrap:wrap; color:var(--rw-muted); font-size:13px; margin-top:5px; }
     .subscription-body { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; align-items:end; margin-top:16px; padding-top:16px; border-top:1px solid #edf0f4; }
     .licence-summary { display:flex; gap:20px; flex-wrap:wrap; }
@@ -227,8 +236,8 @@ function baseHead(req: Request, title: string, extraCss = "") {
     .button.secondary:hover { background:#f8fafc; }
     .button.danger { background:#fff; color:#b91c1c; border-color:#fecaca; }
     .button:disabled { opacity:.48; cursor:not-allowed; }
-    .rename-form { display:flex; gap:8px; align-items:center; margin-top:12px; }
-    .rename-form input { min-width:220px; }
+    .rename-form { display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+    .rename-form input { flex:1 1 260px; min-width:0; }
     .form-grid { display:grid; gap:14px; }
     .form-grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
     label { display:grid; gap:6px; font-weight:650; font-size:14px; }
@@ -380,6 +389,15 @@ function subscriptionCard(req: Request, subscription: Awaited<ReturnType<typeof 
       <div>
         <div class="subscription-title">
           <h2>${escapeHtml(displayName)}</h2>
+          <details class="subscription-rename">
+            <summary aria-label="Edit subscription reference" title="Edit subscription reference">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </summary>
+            <form class="subscription-rename__form" method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/label`)}">
+              <input name="label" maxlength="80" value="${escapeHtml(subscription.label || "")}" placeholder="Your reference here" aria-label="Subscription reference">
+              <button class="button secondary" type="submit">Save</button>
+            </form>
+          </details>
           <span class="status-pill ${statusClass(subscription.status)}">${escapeHtml(subscription.status.replaceAll("_", " ").toLowerCase())}</span>
         </div>
         <div class="subscription-meta">
@@ -391,10 +409,6 @@ function subscriptionCard(req: Request, subscription: Awaited<ReturnType<typeof 
       </div>
     </div>
     ${subscription.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Cancellation scheduled</strong>This subscription will remain active until ${escapeHtml(date(subscription.currentPeriodEnd))} and will not renew.</div>` : ""}
-    <form class="rename-form" method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/label`)}">
-      <input name="label" maxlength="80" value="${escapeHtml(subscription.label || "")}" placeholder="Name this subscription, e.g. Taste of Northumberland">
-      <button class="button secondary" type="submit">Save name</button>
-    </form>
     <div class="subscription-body">
       <div class="licence-summary">
         ${licence ? `<div><strong>Licence •••• ${escapeHtml(licence.keyLastFour)}</strong><span>${licence.activations.length} / ${licence.activationLimit} sites activated</span></div><div><strong>Licence status</strong><span>${escapeHtml(licence.status.toLowerCase())} · ${escapeHtml(delivery?.text || "")}</span></div>` : `<div><strong>Licence</strong><span>No licence linked yet</span></div>`}
@@ -680,7 +694,7 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
       return `<div class="plan-option ${isScheduled ? "is-scheduled" : ""}"><h3>${escapeHtml(plan.name)}</h3><div class="plan-option__meta">${escapeHtml(planPrice(plan))} · ${targetLimit} site${targetLimit === 1 ? "" : "s"}</div><div class="muted small" style="margin-bottom:12px">${escapeHtml(actionNote)}</div><form method="post" action="${portalPath(req, `/subscriptions/${subscription?.id}/change-plan`)}"><input type="hidden" name="plan_id" value="${escapeHtml(plan.id)}"><button class="button ${deferred ? "secondary" : "primary"}" type="submit" ${disabled || isScheduled ? "disabled" : ""}>${escapeHtml(actionLabel)}</button></form></div>`;
     }).join("");
 
-    const body = `<div class="page-head"><div><div class="eyebrow">Manage subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to subscriptions</a></div>${flash}${stateBanner}<section class="account-card"><div class="card-head"><div><h2>Current plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length}/${licence.activationLimit} activated</span>` : ""}</div></div><span class="status-pill ${statusClass(subscription.status)}">${escapeHtml(subscription.status.replaceAll("_", " ").toLowerCase())}</span></div><form class="rename-form" method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/label`)}"><input name="label" maxlength="80" value="${escapeHtml(subscription.label || "")}" placeholder="Name this subscription"><button class="button secondary" type="submit">Save name</button></form></section><section class="account-card"><h2>Change plan</h2>${subscription.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Plan changes are paused</strong>Keep your subscription first if you want to change plan.</div>` : `<p class="muted">Upgrades take effect immediately after Stripe confirms the prorated payment. Downgrades take effect at renewal.</p>`}<div class="plan-grid">${planOptions || `<div class="muted">No alternative plans are currently available.</div>`}</div></section><section class="account-card"><h2>Billing</h2><p class="muted">Payment details are updated securely in Stripe.</p><div class="actions"><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/payment-method`)}"><button class="button secondary" type="submit">Update payment method</button></form></div></section><section class="account-card"><h2>Subscription status</h2>${subscription.cancelAtPeriodEnd ? `<p class="muted">Cancellation is already scheduled. Use “Keep my subscription” above to reactivate renewal.</p>` : `<p class="muted">You can cancel at the end of the current billing period. Your licence remains active until that date.</p><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel`)}"><button class="button danger" type="submit">Cancel subscription</button></form>`}</section>`;
+    const body = `<div class="page-head"><div><div class="eyebrow">Manage subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to subscriptions</a></div>${flash}${stateBanner}<section class="account-card"><div class="card-head"><div><h2>Current plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length}/${licence.activationLimit} activated</span>` : ""}</div></div><span class="status-pill ${statusClass(subscription.status)}">${escapeHtml(subscription.status.replaceAll("_", " ").toLowerCase())}</span></div><details class="subscription-rename" style="margin-top:12px"><summary aria-label="Edit subscription reference" title="Edit subscription reference"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></summary><form class="subscription-rename__form" method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/label`)}"><input name="label" maxlength="80" value="${escapeHtml(subscription.label || "")}" placeholder="Your reference here" aria-label="Subscription reference"><button class="button secondary" type="submit">Save</button></form></details></section><section class="account-card"><h2>Change plan</h2>${subscription.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Plan changes are paused</strong>Keep your subscription first if you want to change plan.</div>` : `<p class="muted">Upgrades take effect immediately after Stripe confirms the prorated payment. Downgrades take effect at renewal.</p>`}<div class="plan-grid">${planOptions || `<div class="muted">No alternative plans are currently available.</div>`}</div></section><section class="account-card"><h2>Billing</h2><p class="muted">Payment details are updated securely in Stripe.</p><div class="actions"><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/payment-method`)}"><button class="button secondary" type="submit">Update payment method</button></form></div></section><section class="account-card"><h2>Subscription status</h2>${subscription.cancelAtPeriodEnd ? `<p class="muted">Cancellation is already scheduled. Use “Keep my subscription” above to reactivate renewal.</p>` : `<p class="muted">You can cancel at the end of the current billing period. Your licence remains active until that date.</p><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel`)}"><button class="button danger" type="submit">Cancel subscription</button></form>`}</section>`;
     return res.send(appShell(req, `Manage ${displayName}`, "subscriptions", customer, body));
   } catch (error) { next(error); }
 });
