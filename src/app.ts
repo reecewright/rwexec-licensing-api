@@ -42,7 +42,7 @@ app.use(
 
 // Stripe must receive the exact raw request body so webhook
 // signatures can be verified.
-app.use("/v1/stripe", stripeWebhookRouter);
+app.use("/stripe", stripeWebhookRouter);
 
 app.use(express.json({ limit: "64kb" }));
 app.use(express.urlencoded({ extended: false, limit: "64kb" }));
