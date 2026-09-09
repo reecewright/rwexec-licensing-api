@@ -371,7 +371,7 @@ function baseHead(req: Request, title: string, extraCss = "") {
     .tab-count { display:inline-flex; min-width:22px; height:22px; padding:0 6px; align-items:center; justify-content:center; border-radius:999px; background:#eef2f7; font-size:11px; }
     .tab-link.is-active .tab-count { background:#fff; }
     .button { display:inline-flex; align-items:center; justify-content:center; border-radius:8px; padding:10px 13px; font:inherit; font-weight:750; text-decoration:none; cursor:pointer; border:1px solid transparent; min-height:40px; }
-    .button.primary { background:var(--rw-orange); color:#fff; border-color:var(--rw-orange); }
+    .button.primary { background:var(--rw-orange); color:#111827; border-color:var(--rw-orange); }
     .button.primary:hover { filter:brightness(.96); }
     .button.secondary { background:#fff; color:#111827; border-color:#d6dce5; }
     .button.secondary:hover { background:#f8fafc; }
@@ -443,7 +443,7 @@ function appShell(
   <div class="mobile-topbar">
     ${logoBlock(req, true)}
     <form method="post" action="${portalPath(req, "/logout")}">
-      <button class="signout-button" type="submit">Sign out</button>
+      <button class="signout-button" type="submit">Sign Out</button>
     </form>
   </div>
   <div class="account-layout">
@@ -452,7 +452,7 @@ function appShell(
       <nav class="account-nav" aria-label="Account navigation">
         ${navLink(req, "/", "Dashboard", active, "dashboard")}
         ${navLink(req, "/subscriptions", "Subscriptions", active, "subscriptions")}
-        ${navLink(req, "/licenses", "Licences & sites", active, "licenses")}
+        ${navLink(req, "/licenses", "Licences & Sites", active, "licenses")}
         ${navLink(req, "/billing", "Billing", active, "billing")}
         ${navLink(req, "/profile", "Account", active, "profile")}
       </nav>
@@ -462,7 +462,7 @@ function appShell(
           <span>${escapeHtml(customer.email)}</span>
         </div>
         <form method="post" action="${portalPath(req, "/logout")}">
-          <button class="signout-button" type="submit">Sign out</button>
+          <button class="signout-button" type="submit">Sign Out</button>
         </form>
       </div>
     </aside>
@@ -565,8 +565,8 @@ function subscriptionCard(req: Request, subscription: Awaited<ReturnType<typeof 
         ${licence ? `<div><strong>Licence •••• ${escapeHtml(licence.keyLastFour)}</strong><span>${licence.activations.length} / ${licence.activationLimit} sites activated</span></div><div><strong>Licence status</strong><span>${escapeHtml(licence.status.toLowerCase())} · ${escapeHtml(delivery?.text || "")}</span></div>` : `<div><strong>Licence</strong><span>No licence linked yet</span></div>`}
       </div>
       <div class="actions">
-        ${licence && delivery?.canReveal ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button secondary" type="submit">Reveal licence key</button></form>` : ""}
-        <a class="button primary" href="${portalPath(req, `/subscriptions/${subscription.id}/manage`)}">Manage subscription</a>
+        ${licence && delivery?.canReveal ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button secondary" type="submit">Reveal Licence Key</button></form>` : ""}
+        <a class="button primary" href="${portalPath(req, `/subscriptions/${subscription.id}/manage`)}">Manage Subscription</a>
       </div>
     </div>
   </section>`;
@@ -660,7 +660,7 @@ customerPortalRouter.get("/checkout-success", async (req, res, next) => {
     if (!complete) {
       return res.status(409).send(publicShell(req, "Checkout pending", `<section class="account-login__card">${logoBlock(req)}<h1>Payment is still processing</h1><p class="muted">Please wait a moment and refresh this page.</p></section>`));
     }
-    return res.send(publicShell(req, "Subscription active", `<section class="account-login__card">${logoBlock(req)}<h1>Subscription confirmed</h1><div class="notice success"><strong>Payment successful</strong>RWExec is setting up your account and licence.</div><p>We’ve emailed you a secure link to access your customer account.</p><a class="button primary" href="${portalPath(req)}">Open customer account</a></section>`));
+    return res.send(publicShell(req, "Subscription active", `<section class="account-login__card">${logoBlock(req)}<h1>Subscription confirmed</h1><div class="notice success"><strong>Payment successful</strong>RWExec is setting up your account and licence.</div><p>We’ve emailed you a secure link to access your customer account.</p><a class="button primary" href="${portalPath(req)}">Open Customer Account</a></section>`));
   } catch (error) { next(error); }
 });
 
@@ -669,7 +669,7 @@ customerPortalRouter.get("/", async (req, res, next) => {
     const customer = await requireCustomer(req, res);
     if (!customer) {
       const msg = req.query.sent === "1" ? `<div class="notice success"><strong>Check your inbox</strong>If that email belongs to an RWExec customer, a secure sign-in link has been sent.</div>` : "";
-      return res.send(publicShell(req, "Customer account", `<section class="account-login__card">${logoBlock(req)}<h1>Customer account</h1><p class="muted">Enter your RWExec account email and we’ll send a secure sign-in link.</p>${msg}<form class="form-grid" method="post" action="${portalPath(req, "/request-link")}"><label>Email address<input type="email" name="email" required autocomplete="email"></label><button class="button primary" type="submit">Email sign-in link</button></form>${customerEmailConfigured() ? "" : `<div class="notice error" style="margin-top:16px"><strong>Email unavailable</strong>Customer email delivery is not configured yet.</div>`}</section>`));
+      return res.send(publicShell(req, "Customer account", `<section class="account-login__card">${logoBlock(req)}<h1>Customer account</h1><p class="muted">Enter your RWExec account email and we’ll send a secure sign-in link.</p>${msg}<form class="form-grid" method="post" action="${portalPath(req, "/request-link")}"><label>Email address<input type="email" name="email" required autocomplete="email"></label><button class="button primary" type="submit">Email Sign-In Link</button></form>${customerEmailConfigured() ? "" : `<div class="notice error" style="margin-top:16px"><strong>Email unavailable</strong>Customer email delivery is not configured yet.</div>`}</section>`));
     }
 
     const subscriptions = await loadCustomerSubscriptions(customer.id);
@@ -693,9 +693,9 @@ customerPortalRouter.get("/", async (req, res, next) => {
       .sort((a, b) => (a.currentPeriodEnd?.getTime() || 0) - (b.currentPeriodEnd?.getTime() || 0))[0];
 
     const body = `<div class="page-head"><div><div class="eyebrow">Customer dashboard</div><h1>Welcome${customer.name ? `, ${escapeHtml(customer.name.split(" ")[0])}` : ""}</h1><p>Manage your RWExec subscriptions, licences, sites and account.</p></div></div>
-      ${attention.length ? `<div class="notice warning"><strong>${attention.length} subscription${attention.length === 1 ? " needs" : "s need"} your attention</strong><a href="${portalPath(req, "/subscriptions")}" style="color:inherit;font-weight:700">Review subscriptions</a> to see the details.</div>` : ""}
+      ${attention.length ? `<div class="notice warning"><strong>${attention.length} subscription${attention.length === 1 ? " needs" : "s need"} your attention</strong><a href="${portalPath(req, "/subscriptions")}" style="color:inherit;font-weight:700">Review Subscriptions</a> to see the details.</div>` : ""}
       <div class="stats-grid"><div class="stat-card"><div class="stat-card__label">Active subscriptions</div><div class="stat-card__value">${activeSubscriptions.length}</div></div><div class="stat-card"><div class="stat-card__label">Sites activated</div><div class="stat-card__value">${activeSites}<span class="muted" style="font-size:16px"> / ${totalSites}</span></div></div><div class="stat-card"><div class="stat-card__label">Next renewal</div><div class="stat-card__value" style="font-size:19px;line-height:1.25">${nextRenewal ? escapeHtml(shortDate(nextRenewal.currentPeriodEnd)) : "—"}</div></div></div>
-      <div class="section-grid"><div><div class="card-head"><h2>Your subscriptions</h2><a class="button secondary" href="${portalPath(req, "/subscriptions")}">View all</a></div>${subscriptions.slice(0, 3).map((s) => subscriptionCard(req, s)).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}</div><div><section class="account-card"><h2>Recent activity</h2><div class="activity-list">${activity.length ? activity.map(({ event, text }) => `<div class="activity-row"><strong>${escapeHtml(text)}</strong><span>${escapeHtml(shortDate(event.createdAt))}</span></div>`).join("") : `<div class="muted small">No recent account activity.</div>`}</div></section><section class="account-card"><h2>Quick links</h2><div class="actions"><a class="button secondary" href="${portalPath(req, "/licenses")}">Manage sites</a><a class="button secondary" href="${portalPath(req, "/profile")}">Account details</a></div></section></div></div>`;
+      <div class="section-grid"><div><div class="card-head"><h2>Your Subscriptions</h2><a class="button secondary" href="${portalPath(req, "/subscriptions")}">View All</a></div>${subscriptions.slice(0, 3).map((s) => subscriptionCard(req, s)).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}</div><div><section class="account-card"><h2>Recent Activity</h2><div class="activity-list">${activity.length ? activity.map(({ event, text }) => `<div class="activity-row"><strong>${escapeHtml(text)}</strong><span>${escapeHtml(shortDate(event.createdAt))}</span></div>`).join("") : `<div class="muted small">No recent account activity.</div>`}</div></section><section class="account-card"><h2>Quick Links</h2><div class="actions"><a class="button secondary" href="${portalPath(req, "/licenses")}">Manage Sites</a><a class="button secondary" href="${portalPath(req, "/profile")}">Account Details</a></div></section></div></div>`;
     return res.send(appShell(req, "Dashboard", "dashboard", customer, body));
   } catch (error) { next(error); }
 });
@@ -706,7 +706,7 @@ customerPortalRouter.get("/subscriptions", async (req, res, next) => {
     if (!customer) return res.redirect(portalPath(req));
     const subscriptions = await loadCustomerSubscriptions(customer.id);
     const saved = req.query.named === "1" ? `<div class="notice success"><strong>Subscription name saved</strong>Your custom name has been updated.</div>` : "";
-    const body = `<div class="page-head"><div><div class="eyebrow">Subscriptions</div><h1>Your subscriptions</h1><p>Each subscription is grouped with its licence and site allowance so you can tell them apart easily.</p></div></div>${saved}${subscriptions.map((s) => subscriptionCard(req, s)).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}`;
+    const body = `<div class="page-head"><div><div class="eyebrow">Subscriptions</div><h1>Your Subscriptions</h1><p>Each subscription is grouped with its licence and site allowance so you can tell them apart easily.</p></div></div>${saved}${subscriptions.map((s) => subscriptionCard(req, s)).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}`;
     return res.send(appShell(req, "Subscriptions", "subscriptions", customer, body));
   } catch (error) { next(error); }
 });
@@ -753,7 +753,7 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
     });
 
     const deactivated = req.query.deactivated === "1"
-      ? `<div class="notice success"><strong>Site deactivated</strong>That activation slot is now available to use again.</div>`
+      ? `<div class="notice success"><strong>Site Deactivated</strong>The licence slot is now available to use on another website. The deactivated WordPress site may temporarily show its previous cached status; open RWExec Reservations → Licence and click <strong style="display:inline">Check Licence Now</strong> to refresh it immediately.</div>`
       : "";
     const reactivationCancelled = req.query.reactivation_cancelled === "1"
       ? `<div class="notice info"><strong>Reactivation cancelled</strong>No changes were made to your licence.</div>`
@@ -780,7 +780,7 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
           : lifecycle === "expired" && subscription.complimentary
             ? `<span class="muted small"><strong>Managed by RWExec</strong></span>`
             : secret.canReveal
-              ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button primary" type="submit">Reveal licence key</button></form>`
+              ? `<form method="post" action="${portalPath(req, `/licenses/${licence.id}/reveal`)}"><button class="button primary" type="submit">Reveal Licence Key</button></form>`
               : "";
 
         return `<section class="account-card">
@@ -819,8 +819,8 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
         ? "No licences are currently ending."
         : "No active licences yet.";
 
-    const body = `<div class="page-head"><div><div class="eyebrow">Licences & sites</div><h1>Licence usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div></div>${deactivated}${reactivationCancelled}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
-    return res.send(appShell(req, "Licences & sites", "licenses", customer, body));
+    const body = `<div class="page-head"><div><div class="eyebrow">Licences & Sites</div><h1>Licence Usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div></div>${deactivated}${reactivationCancelled}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
+    return res.send(appShell(req, "Licences & Sites", "licenses", customer, body));
   } catch (error) { next(error); }
 });
 
@@ -844,7 +844,7 @@ customerPortalRouter.get("/billing", async (req, res, next) => {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
     const subscriptions = await loadCustomerSubscriptions(customer.id);
-    const body = `<div class="page-head"><div><div class="eyebrow">Billing</div><h1>Billing & renewals</h1><p>Plan changes and payment details are handled securely through Stripe, while RWExec keeps your licence entitlement in sync.</p></div></div>${subscriptions.map((s) => `<section class="account-card"><div class="card-head"><div><h2>${escapeHtml(subscriptionDisplayName(s))}</h2><div class="subscription-meta"><span>${escapeHtml(s.plan?.name || "Custom plan")}</span>${s.plan ? `<span>${escapeHtml(planPrice(s.plan))}</span>` : ""}<span>${escapeHtml(billingPeriodText(s))}</span></div></div><span class="status-pill ${statusClass(s.status)}">${escapeHtml(s.status.replaceAll("_", " ").toLowerCase())}</span></div>${s.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Cancellation scheduled</strong>Your subscription remains active until ${escapeHtml(date(s.currentPeriodEnd))}.</div>` : ""}<div class="actions"><a class="button primary" href="${portalPath(req, `/subscriptions/${s.id}/manage`)}">Manage subscription</a></div></section>`).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}`;
+    const body = `<div class="page-head"><div><div class="eyebrow">Billing</div><h1>Billing & Renewals</h1><p>Plan changes and payment details are handled securely through Stripe, while RWExec keeps your licence entitlement in sync.</p></div></div>${subscriptions.map((s) => `<section class="account-card"><div class="card-head"><div><h2>${escapeHtml(s.label?.trim() || s.product.name)}</h2><div class="subscription-meta"><span>${escapeHtml(s.plan?.name || "Custom plan")}</span>${s.plan ? `<span>${escapeHtml(planPrice(s.plan))}</span>` : ""}<span>${escapeHtml(billingPeriodText(s))}</span></div></div><span class="status-pill ${statusClass(s.status)}">${escapeHtml(s.status.replaceAll("_", " ").toLowerCase())}</span></div>${s.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Cancellation scheduled</strong>Your subscription remains active until ${escapeHtml(date(s.currentPeriodEnd))}.</div>` : ""}<div class="actions"><a class="button primary" href="${portalPath(req, `/subscriptions/${s.id}/manage`)}">Manage Subscription</a></div></section>`).join("") || `<section class="account-card empty-state">No subscriptions yet.</section>`}`;
     return res.send(appShell(req, "Billing", "billing", customer, body));
   } catch (error) { next(error); }
 });
@@ -859,7 +859,7 @@ customerPortalRouter.get("/profile", async (req, res, next) => {
     const emailSent = req.query.email_sent === "1" ? `<div class="notice info"><strong>Verification email sent</strong>Open the link sent to your new email address to finish the change.</div>` : "";
     const emailChanged = req.query.email_changed === "1" ? `<div class="notice success"><strong>Email address changed</strong>Your new email address is now used to sign in.</div>` : "";
     const errorMessage = typeof req.query.error === "string" ? `<div class="notice error"><strong>Could not update email</strong>${escapeHtml(req.query.error)}</div>` : "";
-    const body = `<div class="page-head"><div><div class="eyebrow">Account</div><h1>Account details</h1><p>Keep your contact and billing details up to date.</p></div></div>${saved}${emailSent}${emailChanged}${errorMessage}<div class="section-grid"><section class="account-card"><h2>Profile</h2><form class="form-grid" method="post" action="${portalPath(req, "/profile")}"><div class="form-grid two"><label>Your name<input name="name" maxlength="120" value="${escapeHtml(fullCustomer.name || "")}" placeholder="Your name"></label><label>Company / business<input name="company_name" maxlength="160" value="${escapeHtml(fullCustomer.companyName || "")}" placeholder="Optional business name"></label></div><label>Billing email <span class="muted small">Optional. Leave blank to use your account email.</span><input type="email" name="billing_email" value="${escapeHtml(fullCustomer.billingEmail || "")}" placeholder="billing@example.com"></label><button class="button primary" type="submit">Save account details</button></form></section><section class="account-card"><h2>Sign-in email</h2><p class="muted small">Current email</p><p><strong>${escapeHtml(fullCustomer.email)}</strong></p><form class="form-grid" method="post" action="${portalPath(req, "/profile/email")}"><label>New email address<input type="email" name="email" required placeholder="new@example.com"></label><button class="button secondary" type="submit" ${customerEmailConfigured() ? "" : "disabled"}>Send verification email</button></form><p class="muted small" style="margin-bottom:0">We verify the new address before changing your account so a typo cannot lock you out.</p></section></div>`;
+    const body = `<div class="page-head"><div><div class="eyebrow">Account</div><h1>Account Details</h1><p>Keep your contact and billing details up to date.</p></div></div>${saved}${emailSent}${emailChanged}${errorMessage}<div class="section-grid"><section class="account-card"><h2>Profile</h2><form class="form-grid" method="post" action="${portalPath(req, "/profile")}"><div class="form-grid two"><label>Your name<input name="name" maxlength="120" value="${escapeHtml(fullCustomer.name || "")}" placeholder="Your name"></label><label>Company / business<input name="company_name" maxlength="160" value="${escapeHtml(fullCustomer.companyName || "")}" placeholder="Optional business name"></label></div><label>Billing email <span class="muted small">Optional. Leave blank to use your account email.</span><input type="email" name="billing_email" value="${escapeHtml(fullCustomer.billingEmail || "")}" placeholder="billing@example.com"></label><button class="button primary" type="submit">Save Account Details</button></form></section><section class="account-card"><h2>Sign-In Email</h2><p class="muted small">Current email</p><p><strong>${escapeHtml(fullCustomer.email)}</strong></p><form class="form-grid" method="post" action="${portalPath(req, "/profile/email")}"><label>New email address<input type="email" name="email" required placeholder="new@example.com"></label><button class="button secondary" type="submit" ${customerEmailConfigured() ? "" : "disabled"}>Send Verification Email</button></form><p class="muted small" style="margin-bottom:0">We verify the new address before changing your account so a typo cannot lock you out.</p></section></div>`;
     return res.send(appShell(req, "Account", "profile", customer, body));
   } catch (error) { next(error); }
 });
@@ -902,7 +902,7 @@ customerPortalRouter.get("/verify-email", async (req, res, next) => {
     const token = String(req.query.token || "");
     const result = token ? await consumeCustomerEmailChangeToken(token) : null;
     if (!result) {
-      return res.status(400).send(publicShell(req, "Email link expired", `<section class="account-login__card">${logoBlock(req)}<h1>That email-change link is no longer valid</h1><p class="muted">Return to your account and request a new verification email.</p><a class="button primary" href="${portalPath(req, "/profile")}">Open account</a></section>`));
+      return res.status(400).send(publicShell(req, "Email link expired", `<section class="account-login__card">${logoBlock(req)}<h1>That email-change link is no longer valid</h1><p class="muted">Return to your account and request a new verification email.</p><a class="button primary" href="${portalPath(req, "/profile")}">Open Account</a></section>`));
     }
     const stripeCustomers = await prisma.subscription.findMany({
       where: { customerId: result.customerId, externalProvider: "stripe", externalCustomerId: { not: null } },
@@ -931,7 +931,7 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
       include: { product: true, plan: { include: { entitlements: true } }, licenses: { include: { activations: { where: { deactivatedAt: null } } } } },
     });
     if (!subscription?.externalSubscriptionId || !subscription.externalCustomerId || !subscription.plan) {
-      return res.status(404).send(appShell(req, "Subscription unavailable", "subscriptions", customer, `<div class="page-head"><div><h1>Subscription unavailable</h1><p>This subscription cannot be managed online.</p></div></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to subscriptions</a>`));
+      return res.status(404).send(appShell(req, "Subscription unavailable", "subscriptions", customer, `<div class="page-head"><div><h1>Subscription unavailable</h1><p>This subscription cannot be managed online.</p></div></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to Subscriptions</a>`));
     }
 
     try {
@@ -963,9 +963,9 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
         subscription.externalProvider === "stripe" &&
         Boolean(subscription.plan.stripePriceId);
       const action = canReactivate
-        ? `<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/reactivate`)}"><button class="button primary" type="submit">Reactivate subscription</button></form>`
+        ? `<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/reactivate`)}"><button class="button primary" type="submit">Reactivate Subscription</button></form>`
         : `<div class="muted"><strong>${subscription.complimentary ? "Managed by RWExec" : "Online reactivation is unavailable"}</strong>${subscription.complimentary ? " — this entitlement is controlled manually by RWExec." : ""}</div>`;
-      const body = `<div class="page-head"><div><div class="eyebrow">Manage subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to subscriptions</a></div><div class="notice info"><strong>Subscription ended</strong>Your previous subscription and licence history have been kept in your account.</div><section class="account-card"><div class="card-head"><div><h2>Previous plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span>` : ""}</div></div><span class="status-pill bad">Ended</span></div><div class="actions">${action}</div></section>`;
+      const body = `<div class="page-head"><div><div class="eyebrow">Manage Subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to Subscriptions</a></div><div class="notice info"><strong>Subscription ended</strong>Your previous subscription and licence history have been kept in your account.</div><section class="account-card"><div class="card-head"><div><h2>Previous Plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span>` : ""}</div></div><span class="status-pill bad">Ended</span></div><div class="actions">${action}</div></section>`;
       return res.send(appShell(req, `Manage ${displayName}`, "subscriptions", customer, body));
     }
 
@@ -977,9 +977,9 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
       : "";
 
     const stateBanner = subscription.cancelAtPeriodEnd
-      ? `<div class="notice warning"><strong>Cancellation scheduled</strong>Your ${escapeHtml(subscription.plan.name)} subscription remains active with ${currentLimit || licence?.activationLimit || "your current"} site${(currentLimit || licence?.activationLimit) === 1 ? "" : "s"} until <strong style="display:inline">${escapeHtml(date(subscription.currentPeriodEnd))}</strong>. It will not renew.<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/keep`)}" style="margin-top:12px"><button class="button primary" type="submit">Keep my subscription</button></form></div>`
+      ? `<div class="notice warning"><strong>Cancellation scheduled</strong>Your ${escapeHtml(subscription.plan.name)} subscription remains active with ${currentLimit || licence?.activationLimit || "your current"} site${(currentLimit || licence?.activationLimit) === 1 ? "" : "s"} until <strong style="display:inline">${escapeHtml(date(subscription.currentPeriodEnd))}</strong>. It will not renew.<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/keep`)}" style="margin-top:12px"><button class="button primary" type="submit">Keep My Subscription</button></form></div>`
       : scheduled
-        ? `<div class="notice info"><strong>Plan change scheduled</strong>${escapeHtml(subscription.plan.name)} → <strong style="display:inline">${escapeHtml(scheduled.targetPlan.name)}</strong> on ${escapeHtml(date(scheduled.effectiveAt || subscription.currentPeriodEnd))}. You keep your current ${currentLimit || licence?.activationLimit || ""}-site allowance until then.<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel-scheduled-change`)}" style="margin-top:12px"><button class="button secondary" type="submit">Cancel scheduled change</button></form></div>`
+        ? `<div class="notice info"><strong>Plan change scheduled</strong>${escapeHtml(subscription.plan.name)} → <strong style="display:inline">${escapeHtml(scheduled.targetPlan.name)}</strong> on ${escapeHtml(date(scheduled.effectiveAt || subscription.currentPeriodEnd))}. You keep your current ${currentLimit || licence?.activationLimit || ""}-site allowance until then.<form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel-scheduled-change`)}" style="margin-top:12px"><button class="button secondary" type="submit">Cancel Scheduled Change</button></form></div>`
         : `<div class="notice success"><strong>Subscription active</strong>${subscription.currentPeriodEnd ? `Your current plan renews on ${escapeHtml(date(subscription.currentPeriodEnd))}.` : "Your subscription is active."}</div>`;
 
     const planOptions = plans.filter((plan) => plan.id !== subscription?.planId).map((plan) => {
@@ -990,12 +990,12 @@ customerPortalRouter.get("/subscriptions/:id/manage", async (req, res, next) => 
       const deferred = lowerTier || shorterSameTier;
       const isScheduled = scheduled?.targetPlan.id === plan.id;
       const disabled = subscription?.cancelAtPeriodEnd;
-      const actionLabel = isScheduled ? "Scheduled" : deferred ? "Schedule for renewal" : "Switch now";
+      const actionLabel = isScheduled ? "Scheduled" : deferred ? "Schedule for Renewal" : "Switch Now";
       const actionNote = isScheduled ? `Changes on ${date(scheduled?.effectiveAt || subscription?.currentPeriodEnd)}` : deferred ? "No immediate credit or loss of site allowance." : "Stripe shows any prorated charge before you confirm.";
       return `<div class="plan-option ${isScheduled ? "is-scheduled" : ""}"><h3>${escapeHtml(plan.name)}</h3><div class="plan-option__meta">${escapeHtml(planPrice(plan))} · ${targetLimit} site${targetLimit === 1 ? "" : "s"}</div><div class="muted small" style="margin-bottom:12px">${escapeHtml(actionNote)}</div><form method="post" action="${portalPath(req, `/subscriptions/${subscription?.id}/change-plan`)}"><input type="hidden" name="plan_id" value="${escapeHtml(plan.id)}"><button class="button ${deferred ? "secondary" : "primary"}" type="submit" ${disabled || isScheduled ? "disabled" : ""}>${escapeHtml(actionLabel)}</button></form></div>`;
     }).join("");
 
-    const body = `<div class="page-head"><div><div class="eyebrow">Manage subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to subscriptions</a></div>${flash}${stateBanner}<section class="account-card"><div class="card-head"><div><h2>Current plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length}/${licence.activationLimit} activated</span>` : ""}</div></div><span class="status-pill ${statusClass(subscription.status)}">${escapeHtml(subscription.status.replaceAll("_", " ").toLowerCase())}</span></div><details class="subscription-rename" style="margin-top:12px"><summary aria-label="Edit subscription reference" title="Edit subscription reference"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></summary><form class="subscription-rename__form" method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/label`)}"><input name="label" maxlength="80" value="${escapeHtml(subscription.label || "")}" placeholder="Your reference here" aria-label="Subscription reference"><button class="button secondary" type="submit">Save</button></form></details></section><section class="account-card"><h2>Change plan</h2>${subscription.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Plan changes are paused</strong>Keep your subscription first if you want to change plan.</div>` : `<p class="muted">Upgrades take effect immediately after Stripe confirms the prorated payment. Downgrades take effect at renewal.</p>`}<div class="plan-grid">${planOptions || `<div class="muted">No alternative plans are currently available.</div>`}</div></section><section class="account-card"><h2>Billing</h2><p class="muted">Payment details are updated securely in Stripe.</p><div class="actions"><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/payment-method`)}"><button class="button secondary" type="submit">Update payment method</button></form></div></section><section class="account-card"><h2>Subscription status</h2>${subscription.cancelAtPeriodEnd ? `<p class="muted">Cancellation is already scheduled. Use “Keep my subscription” above to reactivate renewal.</p>` : `<p class="muted">You can cancel at the end of the current billing period. Your licence remains active until that date.</p><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel`)}"><button class="button danger" type="submit">Cancel subscription</button></form>`}</section>`;
+    const body = `<div class="page-head"><div><div class="eyebrow">Manage Subscription</div><h1>${escapeHtml(displayName)}</h1><p>${escapeHtml(subscription.product.name)} · ${escapeHtml(subscription.plan.name)}</p></div><a class="button secondary" href="${portalPath(req, "/subscriptions")}">Back to Subscriptions</a></div>${flash}${stateBanner}<section class="account-card"><div class="card-head"><div><h2>Current Plan</h2><div class="subscription-meta"><span>${escapeHtml(subscription.plan.name)}</span><span>${escapeHtml(planPrice(subscription.plan))}</span>${currentLimit ? `<span>${currentLimit} sites</span>` : ""}${licence ? `<span>Licence •••• ${escapeHtml(licence.keyLastFour)}</span><span>${licence.activations.length}/${licence.activationLimit} activated</span>` : ""}</div></div><span class="status-pill ${statusClass(subscription.status)}">${escapeHtml(subscription.status.replaceAll("_", " ").toLowerCase())}</span></div><details class="subscription-rename" style="margin-top:12px"><summary aria-label="Edit subscription reference" title="Edit subscription reference"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></summary><form class="subscription-rename__form" method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/label`)}"><input name="label" maxlength="80" value="${escapeHtml(subscription.label || "")}" placeholder="Your reference here" aria-label="Subscription reference"><button class="button secondary" type="submit">Save</button></form></details></section><section class="account-card"><h2>Change Plan</h2>${subscription.cancelAtPeriodEnd ? `<div class="notice warning"><strong>Plan changes are paused</strong>Keep your subscription first if you want to change plan.</div>` : `<p class="muted">Upgrades take effect immediately after Stripe confirms the prorated payment. Downgrades take effect at renewal.</p>`}<div class="plan-grid">${planOptions || `<div class="muted">No alternative plans are currently available.</div>`}</div></section><section class="account-card"><h2>Billing</h2><p class="muted">Payment details are updated securely in Stripe.</p><div class="actions"><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/payment-method`)}"><button class="button secondary" type="submit">Update Payment Method</button></form></div></section><section class="account-card"><h2>Subscription Status</h2>${subscription.cancelAtPeriodEnd ? `<p class="muted">Cancellation is already scheduled. Use “Keep my subscription” above to reactivate renewal.</p>` : `<p class="muted">You can cancel at the end of the current billing period. Your licence remains active until that date.</p><form method="post" action="${portalPath(req, `/subscriptions/${subscription.id}/cancel`)}"><button class="button danger" type="submit">Cancel Subscription</button></form>`}</section>`;
     return res.send(appShell(req, `Manage ${displayName}`, "subscriptions", customer, body));
   } catch (error) { next(error); }
 });
@@ -1124,7 +1124,7 @@ customerPortalRouter.get("/verify", async (req, res, next) => {
   try {
     const token = String(req.query.token || "");
     const customerId = token ? await consumePortalMagicLink(token) : null;
-    if (!customerId) return res.status(400).send(publicShell(req, "Link expired", `<section class="account-login__card">${logoBlock(req)}<h1>That sign-in link is no longer valid</h1><p class="muted">Request a new secure link from the customer account page.</p><a class="button primary" href="${portalPath(req)}">Request a new link</a></section>`));
+    if (!customerId) return res.status(400).send(publicShell(req, "Link expired", `<section class="account-login__card">${logoBlock(req)}<h1>That sign-in link is no longer valid</h1><p class="muted">Request a new secure link from the customer account page.</p><a class="button primary" href="${portalPath(req)}">Request a New Link</a></section>`));
     setCustomerSession(res, customerId);
     normaliseCustomerCookiePath(req, res);
     return res.redirect(portalPath(req));
@@ -1167,7 +1167,7 @@ customerPortalRouter.post("/licenses/:id/reveal", licenceRevealLimiter, async (r
       : null;
 
     const rawKey = await revealLicenceKey(licence.id, customer.id);
-    if (!rawKey) return res.status(409).send(appShell(req, "Licence unavailable", "licenses", customer, `<div class="page-head"><div><h1>Licence key unavailable</h1><p>The full key is not stored for this older licence. The licence itself is unchanged and can continue working on existing sites.</p></div></div><section class="account-card"><div class="notice info"><strong>Need the full key?</strong>Contact RWExec if you need this licence regenerated. Regeneration would replace the existing key, so it should only be used when necessary.</div><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></section>`));
+    if (!rawKey) return res.status(409).send(appShell(req, "Licence unavailable", "licenses", customer, `<div class="page-head"><div><h1>Licence key unavailable</h1><p>The full key is not stored for this older licence. The licence itself is unchanged and can continue working on existing sites.</p></div></div><section class="account-card"><div class="notice info"><strong>Need the full key?</strong>Contact RWExec if you need this licence regenerated. Regeneration would replace the existing key, so it should only be used when necessary.</div><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to Licences</a></section>`));
 
     const label = subscription && subscriptionProduct
       ? subscriptionDisplayName({
@@ -1177,7 +1177,7 @@ customerPortalRouter.post("/licenses/:id/reveal", licenceRevealLimiter, async (r
         })
       : product.name;
     const safeRawKey = escapeHtml(rawKey);
-    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your licence key</h1><p>${escapeHtml(product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key" disabled aria-disabled="true">Copy key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script src="${portalPath(req, "/assets/licence-key.js")}" defer></script>`));
+    return res.send(appShell(req, "Your licence key", "licenses", customer, `<div class="page-head"><div><div class="eyebrow">${escapeHtml(label)}</div><h1>Your Licence Key</h1><p>${escapeHtml(product.name)}</p></div></div><section class="account-card"><div class="notice success"><strong>Secure licence access</strong>You can return to your RWExec account and reveal this key again whenever you need it.</div><div class="secret" id="licence-key" data-key="${safeRawKey}" style="filter:blur(7px);user-select:none">${safeRawKey}</div><div class="actions" style="margin-top:14px"><button class="button secondary" type="button" id="toggle-licence-key">Reveal</button><button class="button primary" type="button" id="copy-licence-key" disabled aria-disabled="true">Copy Key</button><a class="button secondary" href="${portalPath(req, "/licenses")}">Back to Licences</a></div><div class="muted small" id="copy-status" style="margin-top:10px" aria-live="polite">The key is hidden by default on each visit.</div></section><script src="${portalPath(req, "/assets/licence-key.js")}" defer></script>`));
   } catch (error) { next(error); }
 });
 
@@ -1190,6 +1190,6 @@ customerPortalRouter.use((error: unknown, req: Request, res: Response, _next: Ne
   res.status(500).send(publicShell(
     req,
     "Something went wrong",
-    `<section class="account-login__card">${logoBlock(req)}<h1>We couldn’t complete that request</h1><p class="muted">Please try again. If it keeps happening, give RWExec this reference so we can trace the error.</p><div class="secret" style="margin:16px 0;font-size:14px">${escapeHtml(requestId)}</div><a class="button primary" href="${portalPath(req)}">Back to your account</a></section>`,
+    `<section class="account-login__card">${logoBlock(req)}<h1>We couldn’t complete that request</h1><p class="muted">Please try again. If it keeps happening, give RWExec this reference so we can trace the error.</p><div class="secret" style="margin:16px 0;font-size:14px">${escapeHtml(requestId)}</div><a class="button primary" href="${portalPath(req)}">Back to Your Account</a></section>`,
   ));
 });
