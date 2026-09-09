@@ -928,18 +928,18 @@ router.get("/licenses/:id", async (req, res, next) => {
   </p>
 
   <div class="actions">
+
     <form
       method="post"
       action="/admin/licenses/${escapeHtml(licence.id)}/action"
-      onsubmit="return confirm('Reactivate this licence? It will be allowed to validate again.');"
     >
-      <input
-        type="hidden"
-        name="action"
-        value="reactivate"
-      >
+      <input type="hidden" name="action" value="reactivate">
 
-      <button class="button secondary" type="submit">
+      <button
+        class="button secondary"
+        type="submit"
+        onclick="return confirm('Reactivate this licence? It will be allowed to validate again.');"
+      >
         Reactivate
       </button>
     </form>
@@ -947,15 +947,14 @@ router.get("/licenses/:id", async (req, res, next) => {
     <form
       method="post"
       action="/admin/licenses/${escapeHtml(licence.id)}/action"
-      onsubmit="return confirm('Suspend this licence? It will stop validating until reactivated.');"
     >
-      <input
-        type="hidden"
-        name="action"
-        value="suspend"
-      >
+      <input type="hidden" name="action" value="suspend">
 
-      <button class="button warning" type="submit">
+      <button
+        class="button warning"
+        type="submit"
+        onclick="return confirm('Suspend this licence? It will stop validating until reactivated.');"
+      >
         Suspend
       </button>
     </form>
@@ -963,15 +962,14 @@ router.get("/licenses/:id", async (req, res, next) => {
     <form
       method="post"
       action="/admin/licenses/${escapeHtml(licence.id)}/action"
-      onsubmit="return confirm('Revoke this licence? It will immediately stop validating.');"
     >
-      <input
-        type="hidden"
-        name="action"
-        value="revoke"
-      >
+      <input type="hidden" name="action" value="revoke">
 
-      <button class="button danger" type="submit">
+      <button
+        class="button danger"
+        type="submit"
+        onclick="return confirm('Revoke this licence? It will immediately stop validating.');"
+      >
         Revoke
       </button>
     </form>
@@ -979,15 +977,14 @@ router.get("/licenses/:id", async (req, res, next) => {
     <form
       method="post"
       action="/admin/licenses/${escapeHtml(licence.id)}/action"
-      onsubmit="return confirm('Reset all active installations for this licence? All currently activated sites will be disconnected.');"
     >
-      <input
-        type="hidden"
-        name="action"
-        value="reset_activations"
-      >
+      <input type="hidden" name="action" value="reset_activations">
 
-      <button class="button secondary" type="submit">
+      <button
+        class="button secondary"
+        type="submit"
+        onclick="return confirm('Reset all active installations for this licence? All currently activated sites will be disconnected.');"
+      >
         Reset activations
       </button>
     </form>
@@ -995,15 +992,14 @@ router.get("/licenses/:id", async (req, res, next) => {
     <form
       method="post"
       action="/admin/licenses/${escapeHtml(licence.id)}/action"
-      onsubmit="return confirm('Generate a replacement licence key? The current key will stop working immediately and the new key will only be shown once.');"
     >
-      <input
-        type="hidden"
-        name="action"
-        value="regenerate"
-      >
+      <input type="hidden" name="action" value="regenerate">
 
-      <button class="button danger" type="submit">
+      <button
+        class="button danger"
+        type="submit"
+        onclick="return confirm('Generate a replacement licence key? The current key will stop working immediately and the new key will only be shown once.');"
+      >
         Regenerate key
       </button>
     </form>
@@ -1014,15 +1010,19 @@ router.get("/licenses/:id", async (req, res, next) => {
           <form
             method="post"
             action="/admin/licenses/${escapeHtml(licence.id)}/delete"
-            onsubmit="return confirm('Permanently delete this licence, its activation history and stored delivery record? This cannot be undone.');"
           >
-            <button class="button danger" type="submit">
+            <button
+              class="button danger"
+              type="submit"
+              onclick="return confirm('Permanently delete this licence, its activation history and stored delivery record? This cannot be undone.');"
+            >
               Delete permanently
             </button>
           </form>
         `
         : ""
     }
+
   </div>
 </section>
     `;
