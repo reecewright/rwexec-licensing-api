@@ -206,7 +206,7 @@ function emailTemplate(input: {
                   <w:anchorlock/>
                   <center
                     style="
-                      color:#ffffff;
+                      color:#111111;
                       font-family:Arial,sans-serif;
                       font-size:15px;
                       font-weight:bold;
@@ -223,7 +223,7 @@ function emailTemplate(input: {
                   style="
                     display:inline-block;
                     background:#ff6a00;
-                    color: black;
+                    color:#111111;
                     text-decoration:none;
                     font-size:15px;
                     line-height:20px;
@@ -338,7 +338,7 @@ export async function sendCustomerPortalEmail(
         "Your RWExec customer account is ready. Use the secure link below to open your account and manage your software.";
 
       buttonText =
-        "Open my account";
+        "Open My Account";
 
       break;
 
@@ -354,7 +354,7 @@ export async function sendCustomerPortalEmail(
         "Use the secure link below to sign in to your RWExec customer account.";
 
       buttonText =
-        "Sign in securely";
+        "Sign In Securely";
 
       break;
   }
