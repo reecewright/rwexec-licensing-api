@@ -172,10 +172,11 @@ router.get("/", async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.get("/customers", async (_req, res, next) => {
+router.get("/customers", async (req, res, next) => {
   try {
     const customers = await prisma.customer.findMany({ orderBy: { createdAt: "desc" }, include: { _count: { select: { licenses: true, subscriptions: true } } } });
-    const body = `<section class="panel"><h2>All customers</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Account email</th><th>Billing email</th><th>Subscriptions</th><th>Licences</th><th></th></tr></thead><tbody>${customers.length ? customers.map(c => `<tr><td>${escapeHtml(c.name || "—")}</td><td>${escapeHtml(c.email)}</td><td>${escapeHtml(c.billingEmail || "Same as account")}</td><td>${c._count.subscriptions}</td><td>${c._count.licenses}</td><td><a class="table-action" href="/admin/customers/${escapeHtml(c.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No customers yet.</td></tr>`}</tbody></table></div></section>`;
+    const message = req.query.deleted === "1" ? `<div class="alert success">Customer permanently deleted.</div>` : "";
+    const body = `${message}<section class="panel"><h2>All customers</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Account email</th><th>Billing email</th><th>Subscriptions</th><th>Licences</th><th></th></tr></thead><tbody>${customers.length ? customers.map(c => `<tr><td>${escapeHtml(c.name || "—")}</td><td>${escapeHtml(c.email)}</td><td>${escapeHtml(c.billingEmail || "Same as account")}</td><td>${c._count.subscriptions}</td><td>${c._count.licenses}</td><td><a class="table-action" href="/admin/customers/${escapeHtml(c.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No customers yet.</td></tr>`}</tbody></table></div></section>`;
     res.send(layout("Customers", body, "customers"));
   } catch (error) { next(error); }
 });
@@ -185,15 +186,217 @@ router.get("/customers/:id", async (req, res, next) => {
     const customer = await prisma.customer.findUnique({
       where: { id: req.params.id },
       include: {
-        subscriptions: { orderBy: { createdAt: "desc" }, include: { product: true, plan: true } },
-        licenses: { orderBy: { createdAt: "desc" }, include: { product: true, activations: { where: { deactivatedAt: null } } } }
-      }
+        subscriptions: {
+          orderBy: { createdAt: "desc" },
+          include: { product: true, plan: true },
+        },
+        licenses: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            product: true,
+            activations: { where: { deactivatedAt: null } },
+          },
+        },
+      },
     });
-    if (!customer) return res.status(404).send(layout("Customer not found", `<div class="alert error">Customer not found.</div>`, "customers"));
-    const saved = req.query.saved === "1" ? `<div class="alert success">Customer details updated.</div>` : "";
-    const body = `${saved}<div class="split customer-detail"><section class="panel"><h2>Customer details</h2><form class="form-grid" action="/admin/customers/${escapeHtml(customer.id)}" method="post"><label>Customer / business name<input name="name" value="${escapeHtml(customer.name || "")}" placeholder="Business or customer name"></label><label>Account email <span class="muted">Used as the main RWExec contact and customer identity.</span><input type="email" name="email" value="${escapeHtml(customer.email)}" required></label><label>Billing email <span class="muted">Optional. Leave blank to use the account email.</span><input type="email" name="billing_email" value="${escapeHtml(customer.billingEmail || "")}" placeholder="billing@example.com"></label><button class="button primary" type="submit">Save customer</button></form></section><section class="panel"><h2>Account overview</h2><dl class="detail-list"><div><dt>Created</dt><dd>${date(customer.createdAt)}</dd></div><div><dt>Subscriptions</dt><dd>${customer.subscriptions.length}</dd></div><div><dt>Licences</dt><dd>${customer.licenses.length}</dd></div></dl></section></div><section class="panel"><h2>Customer portal</h2><p class="muted">Send a secure, one-time sign-in link to the customer, or generate a link to copy manually while email delivery is being configured.</p><div class="actions"><form method="post" action="/admin/customers/${escapeHtml(customer.id)}/portal-email"><button class="button primary" type="submit" ${customerEmailConfigured() ? "" : "disabled"}>Email portal link</button></form><form method="post" action="/admin/customers/${escapeHtml(customer.id)}/portal-link"><button class="button secondary" type="submit">Generate portal link</button></form></div>${customerEmailConfigured() ? "" : `<p class="muted">Automatic email is currently disabled because RESEND_API_KEY is not configured.</p>`}</section><section class="panel"><h2>Subscriptions</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Plan</th><th>Status</th><th>Period end</th><th></th></tr></thead><tbody>${customer.subscriptions.length ? customer.subscriptions.map(sub => `<tr><td>${escapeHtml(sub.product.name)}</td><td>${escapeHtml(sub.plan?.name || "Custom")}</td><td><span class="status ${sub.status.toLowerCase()}">${escapeHtml(sub.status.replaceAll("_", " "))}</span></td><td>${date(sub.currentPeriodEnd)}</td><td><a class="table-action" href="/admin/subscriptions/${escapeHtml(sub.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="5" class="muted">No subscriptions.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Licences</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Licence</th><th>Status</th><th>Activations</th><th>Expiry</th><th></th></tr></thead><tbody>${customer.licenses.length ? customer.licenses.map(licence => `<tr><td>${escapeHtml(licence.product.name)}</td><td>•••• ${escapeHtml(licence.keyLastFour)}</td><td><span class="status ${licence.status.toLowerCase()}">${escapeHtml(licence.status)}</span></td><td>${licence.activations.length} / ${licence.activationLimit}</td><td>${date(licence.expiresAt)}</td><td><a class="table-action" href="/admin/licenses/${escapeHtml(licence.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No licences.</td></tr>`}</tbody></table></div></section>`;
+
+    if (!customer) {
+      return res.status(404).send(
+        layout(
+          "Customer not found",
+          `<div class="alert error">Customer not found.</div>`,
+          "customers",
+        ),
+      );
+    }
+
+    const saved =
+      req.query.saved === "1"
+        ? `<div class="alert success">Customer details updated.</div>`
+        : "";
+
+    const activeSubscriptions = customer.subscriptions.filter(subscription =>
+      ["ACTIVE", "TRIALING", "PAST_DUE", "COMPLIMENTARY"].includes(
+        subscription.status,
+      ),
+    );
+    const activeLicences = customer.licenses.filter(
+      licence => licence.status === "ACTIVE",
+    );
+    const canDelete =
+      activeSubscriptions.length === 0 && activeLicences.length === 0;
+
+    const deletePanel = `
+      <section class="panel">
+        <h2>Customer controls</h2>
+        <p class="muted">
+          Permanently delete this customer and their inactive RWExec account data.
+          Stripe records are not changed.
+        </p>
+        ${
+          canDelete
+            ? `
+              <form
+                method="get"
+                action="/admin/customers/${escapeHtml(customer.id)}/delete-confirmation"
+              >
+                <button class="button danger" type="submit">
+                  Delete customer
+                </button>
+              </form>
+            `
+            : `
+              <div class="alert warning">
+                This customer cannot be deleted while they have an active subscription or active licence.
+                Make those records inactive first.
+              </div>
+            `
+        }
+      </section>
+    `;
+
+    const body = `
+      ${saved}
+
+      <div class="split customer-detail">
+        <section class="panel">
+          <h2>Customer details</h2>
+          <form
+            class="form-grid"
+            action="/admin/customers/${escapeHtml(customer.id)}"
+            method="post"
+          >
+            <label>
+              Customer / business name
+              <input
+                name="name"
+                value="${escapeHtml(customer.name || "")}"
+                placeholder="Business or customer name"
+              >
+            </label>
+
+            <label>
+              Account email
+              <span class="muted">Used as the main RWExec contact and customer identity.</span>
+              <input
+                type="email"
+                name="email"
+                value="${escapeHtml(customer.email)}"
+                required
+              >
+            </label>
+
+            <label>
+              Billing email
+              <span class="muted">Optional. Leave blank to use the account email.</span>
+              <input
+                type="email"
+                name="billing_email"
+                value="${escapeHtml(customer.billingEmail || "")}"
+                placeholder="billing@example.com"
+              >
+            </label>
+
+            <button class="button primary" type="submit">
+              Save customer
+            </button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Account overview</h2>
+          <dl class="detail-list">
+            <div><dt>Created</dt><dd>${date(customer.createdAt)}</dd></div>
+            <div><dt>Subscriptions</dt><dd>${customer.subscriptions.length}</dd></div>
+            <div><dt>Licences</dt><dd>${customer.licenses.length}</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>Customer portal</h2>
+        <p class="muted">
+          Send a secure, one-time sign-in link to the customer, or generate a link to copy manually while email delivery is being configured.
+        </p>
+        <div class="actions">
+          <form method="post" action="/admin/customers/${escapeHtml(customer.id)}/portal-email">
+            <button class="button primary" type="submit" ${customerEmailConfigured() ? "" : "disabled"}>
+              Email portal link
+            </button>
+          </form>
+          <form method="post" action="/admin/customers/${escapeHtml(customer.id)}/portal-link">
+            <button class="button secondary" type="submit">
+              Generate portal link
+            </button>
+          </form>
+        </div>
+        ${customerEmailConfigured() ? "" : `<p class="muted">Automatic email is currently disabled because RESEND_API_KEY is not configured.</p>`}
+      </section>
+
+      ${deletePanel}
+
+      <section class="panel">
+        <h2>Subscriptions</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Plan</th>
+                <th>Status</th>
+                <th>Period end</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                customer.subscriptions.length
+                  ? customer.subscriptions
+                      .map(
+                        sub => `<tr><td>${escapeHtml(sub.product.name)}</td><td>${escapeHtml(sub.plan?.name || "Custom")}</td><td><span class="status ${sub.status.toLowerCase()}">${escapeHtml(sub.status.replaceAll("_", " "))}</span></td><td>${date(sub.currentPeriodEnd)}</td><td><a class="table-action" href="/admin/subscriptions/${escapeHtml(sub.id)}">Manage</a></td></tr>`,
+                      )
+                      .join("")
+                  : `<tr><td colspan="5" class="muted">No subscriptions.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Licences</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Licence</th>
+                <th>Status</th>
+                <th>Activations</th>
+                <th>Expiry</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                customer.licenses.length
+                  ? customer.licenses
+                      .map(
+                        licence => `<tr><td>${escapeHtml(licence.product.name)}</td><td>•••• ${escapeHtml(licence.keyLastFour)}</td><td><span class="status ${licence.status.toLowerCase()}">${escapeHtml(licence.status)}</span></td><td>${licence.activations.length} / ${licence.activationLimit}</td><td>${date(licence.expiresAt)}</td><td><a class="table-action" href="/admin/licenses/${escapeHtml(licence.id)}">Manage</a></td></tr>`,
+                      )
+                      .join("")
+                  : `<tr><td colspan="6" class="muted">No licences.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+
     res.send(layout(customer.name || customer.email, body, "customers"));
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/customers/:id", async (req, res, next) => {
@@ -208,6 +411,226 @@ router.post("/customers/:id", async (req, res, next) => {
     await prisma.customer.update({ where: { id: req.params.id }, data: { name, email, billingEmail } });
     res.redirect(`/admin/customers/${encodeURIComponent(req.params.id)}?saved=1`);
   } catch (error) { next(error); }
+});
+
+
+router.get("/customers/:id/delete-confirmation", async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.params.id },
+      include: {
+        subscriptions: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
+        licenses: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!customer) {
+      return res.status(404).send(
+        layout(
+          "Customer not found",
+          `<div class="alert error">Customer not found.</div>`,
+          "customers",
+        ),
+      );
+    }
+
+    const activeSubscriptions = customer.subscriptions.filter(subscription =>
+      ["ACTIVE", "TRIALING", "PAST_DUE", "COMPLIMENTARY"].includes(
+        subscription.status,
+      ),
+    );
+    const activeLicences = customer.licenses.filter(
+      licence => licence.status === "ACTIVE",
+    );
+
+    if (activeSubscriptions.length || activeLicences.length) {
+      return res.status(400).send(
+        layout(
+          "Cannot delete customer",
+          `<section class="panel">
+            <h2>Cannot delete customer</h2>
+            <div class="alert error">
+              This customer still has ${activeSubscriptions.length} active subscription${activeSubscriptions.length === 1 ? "" : "s"} and ${activeLicences.length} active licence${activeLicences.length === 1 ? "" : "s"}.
+              Make those records inactive before permanently deleting the customer.
+            </div>
+            <form method="get" action="/admin/customers/${escapeHtml(customer.id)}">
+              <button class="button secondary" type="submit">Go back</button>
+            </form>
+          </section>`,
+          "customers",
+        ),
+      );
+    }
+
+    const customerName = customer.name || customer.email;
+
+    const body = `
+      <section class="panel">
+        <h2>Permanently delete customer?</h2>
+
+        <div class="alert warning">
+          This permanently deletes the RWExec customer account, all inactive subscriptions,
+          all linked licences, activation history and stored licence delivery records.
+          Customer portal access will also be removed. Stripe records are not changed.
+          This cannot be undone.
+        </div>
+
+        <dl class="detail-list">
+          <div>
+            <dt>Customer</dt>
+            <dd>${escapeHtml(customerName)}</dd>
+          </div>
+          <div>
+            <dt>Account email</dt>
+            <dd>${escapeHtml(customer.email)}</dd>
+          </div>
+          <div>
+            <dt>Subscriptions to delete</dt>
+            <dd>${customer.subscriptions.length}</dd>
+          </div>
+          <div>
+            <dt>Licences to delete</dt>
+            <dd>${customer.licenses.length}</dd>
+          </div>
+        </dl>
+
+        <div class="actions">
+          <form method="get" action="/admin/customers/${escapeHtml(customer.id)}">
+            <button class="button secondary" type="submit">
+              Go back
+            </button>
+          </form>
+
+          <form method="post" action="/admin/customers/${escapeHtml(customer.id)}/delete">
+            <button class="button danger" type="submit">
+              Delete customer permanently
+            </button>
+          </form>
+        </div>
+      </section>
+    `;
+
+    res.send(layout("Delete customer", body, "customers"));
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+router.post("/customers/:id/delete", async (req, res, next) => {
+  try {
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.params.id },
+      include: {
+        subscriptions: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
+        licenses: {
+          select: {
+            id: true,
+            status: true,
+            keyLastFour: true,
+          },
+        },
+      },
+    });
+
+    if (!customer) {
+      return res.status(404).send(
+        layout(
+          "Customer not found",
+          `<div class="alert error">Customer not found.</div>`,
+          "customers",
+        ),
+      );
+    }
+
+    const activeSubscriptions = customer.subscriptions.filter(subscription =>
+      ["ACTIVE", "TRIALING", "PAST_DUE", "COMPLIMENTARY"].includes(
+        subscription.status,
+      ),
+    );
+    const activeLicences = customer.licenses.filter(
+      licence => licence.status === "ACTIVE",
+    );
+
+    // Repeat the safety check on POST so a stale confirmation page cannot
+    // delete a customer whose entitlement became active in the meantime.
+    if (activeSubscriptions.length || activeLicences.length) {
+      return res.status(400).send(
+        layout(
+          "Cannot delete customer",
+          `<section class="panel">
+            <h2>Cannot delete customer</h2>
+            <div class="alert error">
+              This customer now has an active subscription or active licence and cannot be deleted.
+            </div>
+            <form method="get" action="/admin/customers/${escapeHtml(customer.id)}">
+              <button class="button secondary" type="submit">Go back</button>
+            </form>
+          </section>`,
+          "customers",
+        ),
+      );
+    }
+
+    const subscriptionIds = customer.subscriptions.map(subscription => subscription.id);
+
+    await prisma.$transaction(async tx => {
+      // Delete every licence owned by this customer, plus any licence still
+      // linked to one of the customer's subscriptions. Activation and
+      // LicenseDelivery records cascade from licence deletion.
+      await tx.license.deleteMany({
+        where: {
+          OR: [
+            { customerId: customer.id },
+            ...(subscriptionIds.length
+              ? [{ subscriptionId: { in: subscriptionIds } }]
+              : []),
+          ],
+        },
+      });
+
+      // UsageCounter records cascade from subscription deletion.
+      await tx.subscription.deleteMany({
+        where: { customerId: customer.id },
+      });
+
+      // Customer portal and email-change tokens are removed through the
+      // existing Customer relation cascade rules.
+      await tx.customer.delete({
+        where: { id: customer.id },
+      });
+    });
+
+    await writeAudit({
+      action: "customer.deleted",
+      entityType: "customer",
+      entityId: customer.id,
+      summary: "Customer account permanently deleted",
+      metadata: {
+        deletedSubscriptions: customer.subscriptions.length,
+        deletedLicences: customer.licenses.length,
+      },
+    });
+
+    res.redirect("/admin/customers?deleted=1");
+  } catch (error) {
+    next(error);
+  }
 });
 
 
@@ -248,14 +671,15 @@ router.post("/products", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.get("/plans", async (_req, res, next) => {
+router.get("/plans", async (req, res, next) => {
   try {
     const [plans, products] = await Promise.all([
       prisma.plan.findMany({ orderBy: [{ product: { name: "asc" } }, { name: "asc" }], include: { product: true, entitlements: true, _count: { select: { subscriptions: true } } } }),
       prisma.product.findMany({ where: { active: true }, orderBy: { name: "asc" } })
     ]);
     const productOptions = products.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
-    const body = `<div class="split"><section class="panel"><h2>Plans & entitlements</h2><div class="table-wrap"><table><thead><tr><th>Plan</th><th>Product</th><th>Price</th><th>Entitlements</th><th>Customers</th><th></th></tr></thead><tbody>${plans.length ? plans.map(p => `<tr><td>${escapeHtml(p.name)}<div class="muted">${escapeHtml(p.slug)}</div></td><td>${escapeHtml(p.product.name)}</td><td>${money(p.priceMinor,p.currency)}${p.billingInterval ? ` / ${escapeHtml(p.billingInterval)}` : ""}</td><td>${p.entitlements.length ? p.entitlements.map(e => `${escapeHtml(e.label)}: ${e.type === "BOOLEAN" ? (e.enabled ? "Yes" : "No") : escapeHtml(e.limit)}`).join("<br>") : `<span class="muted">None</span>`}</td><td>${p._count.subscriptions}</td><td><a class="table-action" href="/admin/plans/${escapeHtml(p.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No plans yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Create plan</h2><form class="form-grid" action="/admin/plans" method="post"><label>Product<select name="product_id" required>${productOptions}</select></label><label>Plan name<input name="name" required></label><label>Slug<input name="slug" placeholder="business" required></label><div class="form-grid two"><label>Price (£)<input name="price" type="number" min="0" step="0.01" placeholder="29.00"></label><label>Billing<select name="billing_interval"><option value="">None / custom</option><option value="month">Monthly</option><option value="year">Yearly</option></select></label></div><label>Stripe Product ID <span class="muted">Optional until this plan is connected to Stripe.</span><input name="stripe_product_id" placeholder="prod_..."></label><label>Stripe Price ID <span class="muted">This identifies the exact recurring Stripe price used at checkout.</span><input name="stripe_price_id" placeholder="price_..."></label><label>Entitlements <span class="muted">one per line: key|label|boolean|true or key|label|limit|5</span><textarea name="entitlements" rows="5" placeholder="updates|Plugin updates|boolean|true&#10;screens|Screens|limit|5"></textarea></label><button class="button primary" type="submit">Create plan</button></form></section></div>`;
+    const message = req.query.deleted === "1" ? `<div class="alert success">Plan permanently deleted.</div>` : "";
+    const body = `${message}<div class="split"><section class="panel"><h2>Plans & entitlements</h2><div class="table-wrap"><table><thead><tr><th>Plan</th><th>Product</th><th>Price</th><th>Entitlements</th><th>Customers</th><th></th></tr></thead><tbody>${plans.length ? plans.map(p => `<tr><td>${escapeHtml(p.name)}<div class="muted">${escapeHtml(p.slug)}</div></td><td>${escapeHtml(p.product.name)}</td><td>${money(p.priceMinor,p.currency)}${p.billingInterval ? ` / ${escapeHtml(p.billingInterval)}` : ""}</td><td>${p.entitlements.length ? p.entitlements.map(e => `${escapeHtml(e.label)}: ${e.type === "BOOLEAN" ? (e.enabled ? "Yes" : "No") : escapeHtml(e.limit)}`).join("<br>") : `<span class="muted">None</span>`}</td><td>${p._count.subscriptions}</td><td><a class="table-action" href="/admin/plans/${escapeHtml(p.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No plans yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Create plan</h2><form class="form-grid" action="/admin/plans" method="post"><label>Product<select name="product_id" required>${productOptions}</select></label><label>Plan name<input name="name" required></label><label>Slug<input name="slug" placeholder="business" required></label><div class="form-grid two"><label>Price (£)<input name="price" type="number" min="0" step="0.01" placeholder="29.00"></label><label>Billing<select name="billing_interval"><option value="">None / custom</option><option value="month">Monthly</option><option value="year">Yearly</option></select></label></div><label>Stripe Product ID <span class="muted">Optional until this plan is connected to Stripe.</span><input name="stripe_product_id" placeholder="prod_..."></label><label>Stripe Price ID <span class="muted">This identifies the exact recurring Stripe price used at checkout.</span><input name="stripe_price_id" placeholder="price_..."></label><label>Entitlements <span class="muted">one per line: key|label|boolean|true or key|label|limit|5</span><textarea name="entitlements" rows="5" placeholder="updates|Plugin updates|boolean|true&#10;screens|Screens|limit|5"></textarea></label><button class="button primary" type="submit">Create plan</button></form></section></div>`;
     res.send(layout("Plans", body, "plans"));
   } catch (error) { next(error); }
 });
@@ -356,7 +780,17 @@ router.get("/plans/:id", async (req, res, next) => {
     if (!plan) return res.status(404).send(layout("Plan not found", `<div class="alert error">Plan not found.</div>`, "plans"));
     const entitlementText = plan.entitlements.map(e => `${e.key}|${e.label}|${e.type === "LIMIT" ? "limit" : "boolean"}|${e.type === "LIMIT" ? (e.limit ?? 0) : (e.enabled ? "true" : "false")}`).join("\n");
     const message = req.query.saved === "1" ? `<div class="alert success">Plan updated.</div>` : "";
-    const body = `${message}<div class="split"><section class="panel"><h2>${escapeHtml(plan.product.name)} — ${escapeHtml(plan.name)}</h2><form class="form-grid" action="/admin/plans/${escapeHtml(plan.id)}" method="post"><label>Plan name<input name="name" value="${escapeHtml(plan.name)}" required></label><label>Description<textarea name="description" rows="3">${escapeHtml(plan.description || "")}</textarea></label><div class="form-grid two"><label>Price (£)<input name="price" type="number" min="0" step="0.01" value="${plan.priceMinor === null ? "" : (plan.priceMinor / 100).toFixed(2)}"></label><label>Billing<select name="billing_interval"><option value=""${!plan.billingInterval ? " selected" : ""}>None / custom</option><option value="month"${plan.billingInterval === "month" ? " selected" : ""}>Monthly</option><option value="year"${plan.billingInterval === "year" ? " selected" : ""}>Yearly</option></select></label></div><label>Stripe Product ID <span class="muted">Stripe product this plan belongs to.</span><input name="stripe_product_id" value="${escapeHtml(plan.stripeProductId || "")}" placeholder="prod_..."></label><label>Stripe Price ID <span class="muted">Exact Stripe price used for checkout and webhook matching.</span><input name="stripe_price_id" value="${escapeHtml(plan.stripePriceId || "")}" placeholder="price_..."></label><label>Entitlements <span class="muted">one per line: key|label|boolean|true or key|label|limit|5</span><textarea name="entitlements" rows="6">${escapeHtml(entitlementText)}</textarea></label><label class="checkbox-card"><input type="checkbox" name="active" value="1" ${plan.active ? "checked" : ""}><span class="checkbox-copy"><span class="checkbox-title">Plan available</span><span class="checkbox-help">Inactive plans remain on existing subscriptions but cannot be selected for new ones.</span></span></label><button class="button primary" type="submit">Save plan</button></form></section><section class="panel"><h2>Plan overview</h2><dl class="detail-list"><div><dt>Slug</dt><dd>${escapeHtml(plan.slug)}</dd></div><div><dt>Customers</dt><dd>${plan._count.subscriptions}</dd></div><div><dt>Status</dt><dd>${plan.active ? "Active" : "Inactive"}</dd></div><div><dt>Stripe Product</dt><dd><code>${escapeHtml(plan.stripeProductId || "Not connected")}</code></dd></div><div><dt>Stripe Price</dt><dd><code>${escapeHtml(plan.stripePriceId || "Not connected")}</code></dd></div></dl></section></div>`;
+    const canDelete = plan._count.subscriptions === 0;
+    const deletePanel = `
+      <section class="panel">
+        <h2>Plan controls</h2>
+        <p class="muted">Permanently delete this RWExec plan. Stripe products and prices are not changed.</p>
+        ${canDelete
+          ? `<form method="get" action="/admin/plans/${escapeHtml(plan.id)}/delete-confirmation"><button class="button danger" type="submit">Delete plan</button></form>`
+          : `<div class="alert warning">This plan cannot be permanently deleted because ${plan._count.subscriptions} subscription${plan._count.subscriptions === 1 ? " is" : "s are"} linked to it. Make the plan inactive instead if it should no longer be offered.</div>`}
+      </section>
+    `;
+    const body = `${message}<div class="split"><section class="panel"><h2>${escapeHtml(plan.product.name)} — ${escapeHtml(plan.name)}</h2><form class="form-grid" action="/admin/plans/${escapeHtml(plan.id)}" method="post"><label>Plan name<input name="name" value="${escapeHtml(plan.name)}" required></label><label>Description<textarea name="description" rows="3">${escapeHtml(plan.description || "")}</textarea></label><div class="form-grid two"><label>Price (£)<input name="price" type="number" min="0" step="0.01" value="${plan.priceMinor === null ? "" : (plan.priceMinor / 100).toFixed(2)}"></label><label>Billing<select name="billing_interval"><option value=""${!plan.billingInterval ? " selected" : ""}>None / custom</option><option value="month"${plan.billingInterval === "month" ? " selected" : ""}>Monthly</option><option value="year"${plan.billingInterval === "year" ? " selected" : ""}>Yearly</option></select></label></div><label>Stripe Product ID <span class="muted">Stripe product this plan belongs to.</span><input name="stripe_product_id" value="${escapeHtml(plan.stripeProductId || "")}" placeholder="prod_..."></label><label>Stripe Price ID <span class="muted">Exact Stripe price used for checkout and webhook matching.</span><input name="stripe_price_id" value="${escapeHtml(plan.stripePriceId || "")}" placeholder="price_..."></label><label>Entitlements <span class="muted">one per line: key|label|boolean|true or key|label|limit|5</span><textarea name="entitlements" rows="6">${escapeHtml(entitlementText)}</textarea></label><label class="checkbox-card"><input type="checkbox" name="active" value="1" ${plan.active ? "checked" : ""}><span class="checkbox-copy"><span class="checkbox-title">Plan available</span><span class="checkbox-help">Inactive plans remain on existing subscriptions but cannot be selected for new ones.</span></span></label><button class="button primary" type="submit">Save plan</button></form></section><section class="panel"><h2>Plan overview</h2><dl class="detail-list"><div><dt>Slug</dt><dd>${escapeHtml(plan.slug)}</dd></div><div><dt>Customers</dt><dd>${plan._count.subscriptions}</dd></div><div><dt>Status</dt><dd>${plan.active ? "Active" : "Inactive"}</dd></div><div><dt>Stripe Product</dt><dd><code>${escapeHtml(plan.stripeProductId || "Not connected")}</code></dd></div><div><dt>Stripe Price</dt><dd><code>${escapeHtml(plan.stripePriceId || "Not connected")}</code></dd></div></dl></section></div>${deletePanel}`;
     res.send(layout(`Plan: ${plan.name}`, body, "plans"));
   } catch (error) { next(error); }
 });
@@ -378,6 +812,138 @@ router.post("/plans/:id", async (req, res, next) => {
     await writeAudit({ action: "plan.updated", entityType: "plan", entityId: req.params.id, summary: "Plan settings, Stripe mapping and entitlements updated", metadata: { stripeProductId: String(req.body.stripe_product_id ?? "").trim() || null, stripePriceId: String(req.body.stripe_price_id ?? "").trim() || null } });
     res.redirect(`/admin/plans/${encodeURIComponent(req.params.id)}?saved=1`);
   } catch (error) { next(error); }
+});
+
+
+router.get("/plans/:id/delete-confirmation", async (req, res, next) => {
+  try {
+    const plan = await prisma.plan.findUnique({
+      where: { id: req.params.id },
+      include: {
+        product: true,
+        _count: { select: { subscriptions: true } },
+      },
+    });
+
+    if (!plan) {
+      return res.status(404).send(
+        layout(
+          "Plan not found",
+          `<div class="alert error">Plan not found.</div>`,
+          "plans",
+        ),
+      );
+    }
+
+    if (plan._count.subscriptions > 0) {
+      return res.status(400).send(
+        layout(
+          "Cannot delete plan",
+          `<section class="panel">
+            <h2>Cannot delete plan</h2>
+            <div class="alert error">
+              This plan has ${plan._count.subscriptions} linked subscription${plan._count.subscriptions === 1 ? "" : "s"} and cannot be permanently deleted.
+              Make the plan inactive instead if it should no longer be offered.
+            </div>
+            <form method="get" action="/admin/plans/${escapeHtml(plan.id)}">
+              <button class="button secondary" type="submit">Go back</button>
+            </form>
+          </section>`,
+          "plans",
+        ),
+      );
+    }
+
+    const body = `
+      <section class="panel">
+        <h2>Permanently delete plan?</h2>
+        <div class="alert warning">
+          This permanently deletes the RWExec plan and its entitlements.
+          Stripe products and prices are not changed. This cannot be undone.
+        </div>
+        <dl class="detail-list">
+          <div><dt>Product</dt><dd>${escapeHtml(plan.product.name)}</dd></div>
+          <div><dt>Plan</dt><dd>${escapeHtml(plan.name)}</dd></div>
+          <div><dt>Slug</dt><dd>${escapeHtml(plan.slug)}</dd></div>
+          <div><dt>Linked subscriptions</dt><dd>${plan._count.subscriptions}</dd></div>
+        </dl>
+        <div class="actions">
+          <form method="get" action="/admin/plans/${escapeHtml(plan.id)}">
+            <button class="button secondary" type="submit">Go back</button>
+          </form>
+          <form method="post" action="/admin/plans/${escapeHtml(plan.id)}/delete">
+            <button class="button danger" type="submit">Delete plan permanently</button>
+          </form>
+        </div>
+      </section>
+    `;
+
+    res.send(layout("Delete plan", body, "plans"));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/plans/:id/delete", async (req, res, next) => {
+  try {
+    const plan = await prisma.plan.findUnique({
+      where: { id: req.params.id },
+      include: {
+        product: true,
+        _count: { select: { subscriptions: true } },
+      },
+    });
+
+    if (!plan) {
+      return res.status(404).send(
+        layout(
+          "Plan not found",
+          `<div class="alert error">Plan not found.</div>`,
+          "plans",
+        ),
+      );
+    }
+
+    if (plan._count.subscriptions > 0) {
+      return res.status(400).send(
+        layout(
+          "Cannot delete plan",
+          `<section class="panel">
+            <h2>Cannot delete plan</h2>
+            <div class="alert error">
+              This plan now has ${plan._count.subscriptions} linked subscription${plan._count.subscriptions === 1 ? "" : "s"} and cannot be permanently deleted.
+            </div>
+            <form method="get" action="/admin/plans/${escapeHtml(plan.id)}">
+              <button class="button secondary" type="submit">Go back</button>
+            </form>
+          </section>`,
+          "plans",
+        ),
+      );
+    }
+
+    await prisma.$transaction(async tx => {
+      await tx.planEntitlement.deleteMany({ where: { planId: plan.id } });
+      await tx.plan.delete({ where: { id: plan.id } });
+    });
+
+    await writeAudit({
+      action: "plan.deleted",
+      entityType: "plan",
+      entityId: plan.id,
+      summary: `Plan permanently deleted: ${plan.product.name} — ${plan.name}`,
+      metadata: {
+        productId: plan.productId,
+        slug: plan.slug,
+        stripeProductId: plan.stripeProductId,
+        stripePriceId: plan.stripePriceId,
+      },
+    });
+
+    res.redirect("/admin/plans?deleted=1");
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get("/subscriptions/:id", async (req, res, next) => {
