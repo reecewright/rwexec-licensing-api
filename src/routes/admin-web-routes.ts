@@ -383,17 +383,361 @@ router.post("/plans/:id", async (req, res, next) => {
 router.get("/subscriptions/:id", async (req, res, next) => {
   try {
     const [subscription, plans] = await Promise.all([
-      prisma.subscription.findUnique({ where: { id: req.params.id }, include: { customer: true, product: true, plan: true, usage: true, licenses: { include: { activations: { where: { deactivatedAt: null } } } } } }),
-      prisma.plan.findMany({ where: { active: true }, orderBy: { name: "asc" }, include: { product: true } })
+      prisma.subscription.findUnique({
+        where: { id: req.params.id },
+        include: {
+          customer: true,
+          product: true,
+          plan: true,
+          usage: true,
+          licenses: {
+            include: {
+              activations: {
+                where: { deactivatedAt: null },
+              },
+            },
+          },
+        },
+      }),
+      prisma.plan.findMany({
+        where: { active: true },
+        orderBy: { name: "asc" },
+        include: { product: true },
+      }),
     ]);
-    if (!subscription) return res.status(404).send(layout("Subscription not found", `<div class="alert error">Subscription not found.</div>`, "subscriptions"));
-    const availablePlans = plans.filter(p => p.productId === subscription.productId);
-    const notice = req.query.saved === "1" ? `<div class="alert success">Subscription updated.</div>` : req.query.created === "1" ? `<div class="alert success">Subscription created.</div>` : req.query.action ? `<div class="alert success">Subscription action completed.</div>` : "";
-    const period = subscription.currentPeriodEnd ? subscription.currentPeriodEnd.toISOString().slice(0,10) : "";
-    const provider = subscription.complimentary ? "Complimentary" : subscription.externalProvider || "Manual";
-    const body = `${notice}<div class="split customer-detail"><section class="panel"><h2>Subscription details</h2><form class="form-grid" action="/admin/subscriptions/${escapeHtml(subscription.id)}/update" method="post"><label>Customer<input value="${escapeHtml(subscription.customer.name || subscription.customer.email)}" disabled></label><label>Product<input value="${escapeHtml(subscription.product.name)}" disabled></label><label>Plan<select name="plan_id"><option value="">Custom / no plan</option>${availablePlans.map(p => `<option value="${escapeHtml(p.id)}"${p.id === subscription.planId ? " selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select></label><label class="checkbox-card"><input type="checkbox" name="complimentary" value="1" ${subscription.complimentary ? "checked" : ""}><span class="checkbox-copy"><span class="checkbox-title">Complimentary / no billing</span><span class="checkbox-help">Manual complimentary subscriptions can remain active without a billing period.</span></span></label><label>Current period end<input type="date" name="current_period_end" value="${escapeHtml(period)}"></label><button class="button primary" type="submit">Save subscription</button></form></section><section class="panel"><h2>Account overview</h2><dl class="detail-list"><div><dt>Status</dt><dd><span class="status ${subscription.status.toLowerCase()}">${escapeHtml(statusLabel(subscription.status))}</span></dd></div><div><dt>Provider</dt><dd>${escapeHtml(provider)}</dd></div><div><dt>Cancel at period end</dt><dd>${subscription.cancelAtPeriodEnd ? "Yes" : "No"}</dd></div><div><dt>Linked licences</dt><dd>${subscription.licenses.length}</dd></div></dl></section></div><section class="panel"><h2>Subscription controls</h2><p class="muted">These are the same lifecycle states Stripe webhooks will control later.</p><div class="actions"><form method="post" action="/admin/subscriptions/${escapeHtml(subscription.id)}/action"><input type="hidden" name="action" value="reactivate"><button class="button secondary" type="submit">Reactivate</button></form><form method="post" action="/admin/subscriptions/${escapeHtml(subscription.id)}/action"><input type="hidden" name="action" value="suspend"><button class="button warning" type="submit">Suspend</button></form>${subscription.currentPeriodEnd ? `<form method="post" action="/admin/subscriptions/${escapeHtml(subscription.id)}/action"><input type="hidden" name="action" value="cancel_period_end"><button class="button secondary" type="submit">Cancel at period end</button></form>` : ""}<form method="post" action="/admin/subscriptions/${escapeHtml(subscription.id)}/action" onsubmit="return confirm('Cancel this subscription immediately? Linked licences will no longer validate while the subscription is inactive.');"><input type="hidden" name="action" value="cancel_now"><button class="button danger" type="submit">Cancel now</button></form></div></section><section class="panel"><h2>Linked licences</h2><div class="table-wrap"><table><thead><tr><th>Licence</th><th>Status</th><th>Activations</th><th></th></tr></thead><tbody>${subscription.licenses.length ? subscription.licenses.map(l => `<tr><td>•••• ${escapeHtml(l.keyLastFour)}</td><td><span class="status ${l.status.toLowerCase()}">${escapeHtml(l.status)}</span></td><td>${l.activations.length} / ${l.activationLimit}</td><td><a class="table-action" href="/admin/licenses/${escapeHtml(l.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="4" class="muted">No licences linked to this subscription.</td></tr>`}</tbody></table></div></section>`;
-    res.send(layout("Manage subscription", body, "subscriptions"));
-  } catch (error) { next(error); }
+
+    if (!subscription) {
+      return res.status(404).send(
+        layout(
+          "Subscription not found",
+          `<div class="alert error">Subscription not found.</div>`,
+          "subscriptions",
+        ),
+      );
+    }
+
+    const availablePlans = plans.filter(
+      p => p.productId === subscription.productId,
+    );
+
+    const notice =
+      req.query.saved === "1"
+        ? `<div class="alert success">Subscription updated.</div>`
+        : req.query.created === "1"
+          ? `<div class="alert success">Subscription created.</div>`
+          : req.query.action
+            ? `<div class="alert success">Subscription action completed.</div>`
+            : "";
+
+    const period = subscription.currentPeriodEnd
+      ? subscription.currentPeriodEnd.toISOString().slice(0, 10)
+      : "";
+
+    const provider = subscription.complimentary
+      ? "Complimentary"
+      : subscription.externalProvider || "Manual";
+
+    const canDelete = ["CANCELED", "EXPIRED", "SUSPENDED"].includes(
+      subscription.status,
+    );
+
+    const body = `
+      ${notice}
+
+      <div class="split customer-detail">
+        <section class="panel">
+          <h2>Subscription details</h2>
+
+          <form
+            class="form-grid"
+            action="/admin/subscriptions/${escapeHtml(subscription.id)}/update"
+            method="post"
+          >
+            <label>
+              Customer
+              <input
+                value="${escapeHtml(
+                  subscription.customer.name || subscription.customer.email,
+                )}"
+                disabled
+              >
+            </label>
+
+            <label>
+              Product
+              <input
+                value="${escapeHtml(subscription.product.name)}"
+                disabled
+              >
+            </label>
+
+            <label>
+              Plan
+              <select name="plan_id">
+                <option value="">Custom / no plan</option>
+                ${availablePlans
+                  .map(
+                    p => `
+                      <option
+                        value="${escapeHtml(p.id)}"
+                        ${p.id === subscription.planId ? "selected" : ""}
+                      >
+                        ${escapeHtml(p.name)}
+                      </option>
+                    `,
+                  )
+                  .join("")}
+              </select>
+            </label>
+
+            <label class="checkbox-card">
+              <input
+                type="checkbox"
+                name="complimentary"
+                value="1"
+                ${subscription.complimentary ? "checked" : ""}
+              >
+
+              <span class="checkbox-copy">
+                <span class="checkbox-title">
+                  Complimentary / no billing
+                </span>
+
+                <span class="checkbox-help">
+                  Manual complimentary subscriptions can remain active without a billing period.
+                </span>
+              </span>
+            </label>
+
+            <label>
+              Current period end
+              <input
+                type="date"
+                name="current_period_end"
+                value="${escapeHtml(period)}"
+              >
+            </label>
+
+            <button class="button primary" type="submit">
+              Save subscription
+            </button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Account overview</h2>
+
+          <dl class="detail-list">
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <span class="status ${subscription.status.toLowerCase()}">
+                  ${escapeHtml(statusLabel(subscription.status))}
+                </span>
+              </dd>
+            </div>
+
+            <div>
+              <dt>Provider</dt>
+              <dd>${escapeHtml(provider)}</dd>
+            </div>
+
+            <div>
+              <dt>Cancel at period end</dt>
+              <dd>${subscription.cancelAtPeriodEnd ? "Yes" : "No"}</dd>
+            </div>
+
+            <div>
+              <dt>Linked licences</dt>
+              <dd>${subscription.licenses.length}</dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>Subscription controls</h2>
+
+        <p class="muted">
+          Manage the subscription lifecycle. Permanent deletion is only available once the subscription is inactive.
+        </p>
+
+        <div class="actions">
+          <form
+            method="post"
+            action="/admin/subscriptions/${escapeHtml(subscription.id)}/action"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="reactivate"
+            >
+
+            <button
+              class="button secondary"
+              type="submit"
+            >
+              Reactivate
+            </button>
+          </form>
+
+          <form
+            method="post"
+            action="/admin/subscriptions/${escapeHtml(subscription.id)}/action"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="suspend"
+            >
+
+            <button
+              class="button warning"
+              type="submit"
+            >
+              Suspend
+            </button>
+          </form>
+
+          ${
+            subscription.currentPeriodEnd
+              ? `
+                <form
+                  method="post"
+                  action="/admin/subscriptions/${escapeHtml(
+                    subscription.id,
+                  )}/action"
+                >
+                  <input
+                    type="hidden"
+                    name="action"
+                    value="cancel_period_end"
+                  >
+
+                  <button
+                    class="button secondary"
+                    type="submit"
+                  >
+                    Cancel at period end
+                  </button>
+                </form>
+              `
+              : ""
+          }
+
+          <form
+            method="post"
+            action="/admin/subscriptions/${escapeHtml(subscription.id)}/action"
+            onsubmit="return confirm('Cancel this subscription immediately? Linked licences will no longer validate while the subscription is inactive.');"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="cancel_now"
+            >
+
+            <button
+              class="button danger"
+              type="submit"
+            >
+              Cancel now
+            </button>
+          </form>
+
+          ${
+            canDelete
+              ? `
+                <form
+                  method="post"
+                  action="/admin/subscriptions/${escapeHtml(
+                    subscription.id,
+                  )}/delete"
+                  onsubmit="return confirm('Permanently delete this subscription and all linked licences? This cannot be undone.');"
+                >
+                  <button
+                    class="button danger"
+                    type="submit"
+                  >
+                    Delete permanently
+                  </button>
+                </form>
+              `
+              : ""
+          }
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Linked licences</h2>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Licence</th>
+                <th>Status</th>
+                <th>Activations</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                subscription.licenses.length
+                  ? subscription.licenses
+                      .map(
+                        l => `
+                          <tr>
+                            <td>
+                              •••• ${escapeHtml(l.keyLastFour)}
+                            </td>
+
+                            <td>
+                              <span class="status ${l.status.toLowerCase()}">
+                                ${escapeHtml(l.status)}
+                              </span>
+                            </td>
+
+                            <td>
+                              ${l.activations.length} / ${l.activationLimit}
+                            </td>
+
+                            <td>
+                              <a
+                                class="table-action"
+                                href="/admin/licenses/${escapeHtml(l.id)}"
+                              >
+                                Manage
+                              </a>
+                            </td>
+                          </tr>
+                        `,
+                      )
+                      .join("")
+                  : `
+                    <tr>
+                      <td colspan="4" class="muted">
+                        No licences linked to this subscription.
+                      </td>
+                    </tr>
+                  `
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+
+    res.send(
+      layout(
+        "Manage subscription",
+        body,
+        "subscriptions",
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/subscriptions/:id/update", async (req, res, next) => {
@@ -483,6 +827,155 @@ router.post("/licenses/:id/action", async (req, res, next) => {
     await writeAudit({ action: `license.${action}`, entityType: "license", entityId: licence.id, summary: `${action.replaceAll("_", " ")} on licence •••• ${licence.keyLastFour}` });
     res.redirect(`/admin/licenses/${encodeURIComponent(licence.id)}?action=1`);
   } catch (error) { next(error); }
+});
+router.post("/subscriptions/:id/delete", async (req, res, next) => {
+  try {
+    const subscription = await prisma.subscription.findUnique({
+      where: { id: req.params.id },
+      include: {
+        customer: true,
+        product: true,
+        licenses: {
+          select: {
+            id: true,
+            keyLastFour: true,
+          },
+        },
+      },
+    });
+
+    if (!subscription) {
+      return res.status(404).send(
+        layout(
+          "Subscription not found",
+          `<div class="alert error">Subscription not found.</div>`,
+          "subscriptions",
+        ),
+      );
+    }
+
+    if (
+      ["ACTIVE", "TRIALING", "PAST_DUE", "COMPLIMENTARY"].includes(
+        subscription.status,
+      )
+    ) {
+      return res.status(400).send(
+        layout(
+          "Cannot delete subscription",
+          `<div class="alert error">
+            This subscription is still ${escapeHtml(
+              subscription.status.replaceAll("_", " "),
+            )}.
+            Cancel, expire or suspend it before permanently deleting it.
+          </div>
+          <a class="button secondary" href="/admin/subscriptions/${escapeHtml(
+            subscription.id,
+          )}">Back to subscription</a>`,
+          "subscriptions",
+        ),
+      );
+    }
+
+    await prisma.$transaction(async tx => {
+      // Delete linked licences first.
+      // Their activations and LicenseDelivery records cascade automatically.
+      for (const licence of subscription.licenses) {
+        await tx.license.delete({
+          where: { id: licence.id },
+        });
+      }
+
+      // UsageCounter records cascade automatically.
+      await tx.subscription.delete({
+        where: { id: subscription.id },
+      });
+    });
+
+    await writeAudit({
+      action: "subscription.deleted",
+      entityType: "subscription",
+      entityId: subscription.id,
+      summary: `Subscription permanently deleted for ${
+        subscription.customer.name || subscription.customer.email
+      }`,
+      metadata: {
+        customerId: subscription.customerId,
+        productId: subscription.productId,
+        planId: subscription.planId,
+        externalProvider: subscription.externalProvider,
+        externalSubscriptionId: subscription.externalSubscriptionId,
+        deletedLicences: subscription.licenses.map(licence => ({
+          id: licence.id,
+          keyLastFour: licence.keyLastFour,
+        })),
+      },
+    });
+
+    res.redirect("/admin/subscriptions?deleted=1");
+  } catch (error) {
+    next(error);
+  }
+});
+
+
+router.post("/licenses/:id/delete", async (req, res, next) => {
+  try {
+    const licence = await prisma.license.findUnique({
+      where: { id: req.params.id },
+      include: {
+        customer: true,
+        product: true,
+      },
+    });
+
+    if (!licence) {
+      return res.status(404).send(
+        layout(
+          "Licence not found",
+          `<div class="alert error">Licence not found.</div>`,
+          "licenses",
+        ),
+      );
+    }
+
+    if (licence.status === "ACTIVE") {
+      return res.status(400).send(
+        layout(
+          "Cannot delete licence",
+          `<div class="alert error">
+            This licence is still active. Revoke or suspend it before permanently deleting it.
+          </div>
+          <a class="button secondary" href="/admin/licenses/${escapeHtml(
+            licence.id,
+          )}">Back to licence</a>`,
+          "licenses",
+        ),
+      );
+    }
+
+    await prisma.license.delete({
+      where: { id: licence.id },
+    });
+
+    // Activation and LicenseDelivery records cascade automatically.
+
+    await writeAudit({
+      action: "license.deleted",
+      entityType: "license",
+      entityId: licence.id,
+      summary: `Licence •••• ${licence.keyLastFour} permanently deleted`,
+      metadata: {
+        customerId: licence.customerId,
+        productId: licence.productId,
+        subscriptionId: licence.subscriptionId,
+        keyLastFour: licence.keyLastFour,
+      },
+    });
+
+    res.redirect("/admin/licenses?deleted=1");
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get("/audit", async (_req, res, next) => {
