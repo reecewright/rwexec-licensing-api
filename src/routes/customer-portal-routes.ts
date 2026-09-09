@@ -43,6 +43,8 @@ export const customerPortalRouter = Router();
 
 const ACCOUNT_HOST = "account.rwexec.com";
 const ENTITLED_STATUSES = ["ACTIVE", "TRIALING", "COMPLIMENTARY"];
+const RESERVATIONS_PRODUCT_NAME = "RWExec Reservations";
+const RESERVATIONS_PLUGIN_FILENAME = "rwexec-reservations-v1.0.0.zip";
 
 const magicLinkLimiter = rateLimit({
   windowMs: 15 * 60_000,
@@ -408,6 +410,7 @@ function baseHead(req: Request, title: string, extraCss = "") {
     .tab-count { display:inline-flex; min-width:22px; height:22px; padding:0 6px; align-items:center; justify-content:center; border-radius:999px; background:#eef2f7; font-size:11px; }
     .tab-link.is-active .tab-count { background:#fff; }
     .button { display:inline-flex; align-items:center; justify-content:center; border-radius:8px; padding:10px 13px; font:inherit; font-weight:750; text-decoration:none; cursor:pointer; border:1px solid transparent; min-height:40px; }
+    .button svg { width:16px; height:16px; display:block; flex:0 0 auto; margin-right:7px; }
     .button.primary { background:var(--rw-orange); color:#111827; border-color:var(--rw-orange); }
     .button.primary:hover { filter:brightness(.96); }
     .button.secondary { background:#fff; color:#111827; border-color:#d6dce5; }
@@ -871,12 +874,56 @@ customerPortalRouter.post(
   },
 );
 
+customerPortalRouter.get("/downloads/rwexec-reservations", async (req, res, next) => {
+  try {
+    const customer = await requireCustomer(req, res);
+    if (!customer) return res.redirect(portalPath(req));
+
+    const subscriptions = await loadCustomerSubscriptions(customer.id);
+    const canDownload = subscriptions.some(
+      (subscription) =>
+        subscription.product.name === RESERVATIONS_PRODUCT_NAME &&
+        ENTITLED_STATUSES.includes(subscription.status),
+    );
+
+    if (!canDownload) {
+      return res
+        .status(403)
+        .send(
+          publicShell(
+            req,
+            "Plugin download unavailable",
+            `<section class="account-login__card">${logoBlock(req)}<h1>Plugin download unavailable</h1><p class="muted">An active RWExec Reservations subscription is required to download the latest plugin.</p><a class="button primary" href="${portalPath(req, "/licenses")}">Back to Licences &amp; Sites</a></section>`,
+          ),
+        );
+    }
+
+    const pluginPath = path.resolve(
+      process.cwd(),
+      "src/downloads",
+      RESERVATIONS_PLUGIN_FILENAME,
+    );
+
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.download(pluginPath, RESERVATIONS_PLUGIN_FILENAME, (error) => {
+      if (error && !res.headersSent) next(error);
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 customerPortalRouter.get("/licenses", async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
 
     const subscriptions = await loadCustomerSubscriptions(customer.id);
+    const canDownloadReservations = subscriptions.some(
+      (subscription) =>
+        subscription.product.name === RESERVATIONS_PRODUCT_NAME &&
+        ENTITLED_STATUSES.includes(subscription.status),
+    );
     const requestedTab = String(req.query.status || "active");
     const tab = ["active", "ending", "expired"].includes(requestedTab)
       ? (requestedTab as "active" | "ending" | "expired")
@@ -976,7 +1023,11 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
           ? "No licences are currently ending."
           : "No active licences yet.";
 
-    const body = `<div class="page-head"><div><div class="eyebrow">Licences & Sites</div><h1>Licence Usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div></div>${deactivated}${reactivationCancelled}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
+    const downloadButton = canDownloadReservations
+      ? `<a class="button secondary" href="${portalPath(req, "/downloads/rwexec-reservations")}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Download Latest Plugin</a>`
+      : "";
+
+    const body = `<div class="page-head"><div><div class="eyebrow">Licences & Sites</div><h1>Licence Usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div>${downloadButton}</div>${deactivated}${reactivationCancelled}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
     return res.send(
       appShell(req, "Licences & Sites", "licenses", customer, body),
     );
