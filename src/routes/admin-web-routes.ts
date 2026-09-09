@@ -776,17 +776,316 @@ router.post("/subscriptions/:id/action", async (req, res, next) => {
 
 router.get("/licenses/:id", async (req, res, next) => {
   try {
-    const licence = await prisma.license.findUnique({ where: { id: req.params.id }, include: { customer: true, product: true, subscription: { include: { plan: true } }, activations: { orderBy: { activatedAt: "desc" } } } });
-    if (!licence) return res.status(404).send(layout("Licence not found", `<div class="alert error">Licence not found.</div>`, "licenses"));
-    const notice = req.query.saved === "1" ? `<div class="alert success">Licence updated.</div>` : req.query.action ? `<div class="alert success">Licence action completed.</div>` : "";
-    const expiry = licence.expiresAt ? licence.expiresAt.toISOString().slice(0,10) : "";
-    const subscriptionText = licence.subscription ? `${licence.subscription.plan?.name || "Custom"} — ${statusLabel(licence.subscription.status)}` : "Legacy / unlinked";
-    const activeCount = licence.activations.filter(a => !a.deactivatedAt).length;
-    const body = `${notice}<div class="split customer-detail"><section class="panel"><h2>${escapeHtml(licence.product.name)}</h2><form class="form-grid" action="/admin/licenses/${escapeHtml(licence.id)}/update" method="post"><label>Customer<input value="${escapeHtml(licence.customer?.name || licence.customer?.email || "Unassigned")}" disabled></label><label>Subscription<input value="${escapeHtml(subscriptionText)}" disabled></label><div class="form-grid two"><label>Activation limit<input type="number" name="activation_limit" min="1" max="1000" value="${licence.activationLimit}"></label><label>Expiry<input type="date" name="expires_at" value="${escapeHtml(expiry)}"></label></div><button class="button primary" type="submit">Save licence</button></form></section><section class="panel"><h2>Licence overview</h2><dl class="detail-list"><div><dt>Key</dt><dd>•••• ${escapeHtml(licence.keyLastFour)}</dd></div><div><dt>Status</dt><dd><span class="status ${licence.status.toLowerCase()}">${escapeHtml(licence.status)}</span></dd></div><div><dt>Active activations</dt><dd>${activeCount} / ${licence.activationLimit}</dd></div><div><dt>Created</dt><dd>${date(licence.createdAt)}</dd></div></dl></section></div><section class="panel"><h2>Licence controls</h2><div class="actions"><form method="post" action="/admin/licenses/${escapeHtml(licence.id)}/action"><input type="hidden" name="action" value="reactivate"><button class="button secondary" type="submit">Reactivate</button></form><form method="post" action="/admin/licenses/${escapeHtml(licence.id)}/action"><input type="hidden" name="action" value="suspend"><button class="button warning" type="submit">Suspend</button></form><form method="post" action="/admin/licenses/${escapeHtml(licence.id)}/action" onsubmit="return confirm('Revoke this licence? It will immediately stop validating.');"><input type="hidden" name="action" value="revoke"><button class="button danger" type="submit">Revoke</button></form><form method="post" action="/admin/licenses/${escapeHtml(licence.id)}/action" onsubmit="return confirm('Reset all active installations for this licence?');"><input type="hidden" name="action" value="reset_activations"><button class="button secondary" type="submit">Reset activations</button></form><form method="post" action="/admin/licenses/${escapeHtml(licence.id)}/action" onsubmit="return confirm('Generate a replacement key? The old key will stop working immediately and the new key will only be shown once.');"><input type="hidden" name="action" value="regenerate"><button class="button danger" type="submit">Regenerate key</button></form></div></section><section class="panel"><h2>Activation history</h2><div class="table-wrap"><table><thead><tr><th>Site</th><th>Version</th><th>Activated</th><th>Last checked</th><th>Status</th></tr></thead><tbody>${licence.activations.length ? licence.activations.map(a => `<tr><td>${escapeHtml(a.siteUrl)}</td><td>${escapeHtml(a.pluginVersion || "—")}</td><td>${date(a.activatedAt)}</td><td>${date(a.lastCheckedAt)}</td><td>${a.deactivatedAt ? `<span class="status expired">Deactivated</span>` : `<span class="status active">Active</span>`}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">No activations yet.</td></tr>`}</tbody></table></div></section>`;
-    res.send(layout("Manage licence", body, "licenses"));
-  } catch (error) { next(error); }
-});
+    const licence = await prisma.license.findUnique({
+      where: { id: req.params.id },
+      include: {
+        customer: true,
+        product: true,
+        subscription: {
+          include: {
+            plan: true,
+          },
+        },
+        activations: {
+          orderBy: {
+            activatedAt: "desc",
+          },
+        },
+      },
+    });
 
+    if (!licence) {
+      return res.status(404).send(
+        layout(
+          "Licence not found",
+          `<div class="alert error">Licence not found.</div>`,
+          "licenses",
+        ),
+      );
+    }
+
+    const notice =
+      req.query.saved === "1"
+        ? `<div class="alert success">Licence updated.</div>`
+        : req.query.action
+          ? `<div class="alert success">Licence action completed.</div>`
+          : "";
+
+    const expiry = licence.expiresAt
+      ? licence.expiresAt.toISOString().slice(0, 10)
+      : "";
+
+    const subscriptionText = licence.subscription
+      ? `${licence.subscription.plan?.name || "Custom"} — ${statusLabel(
+          licence.subscription.status,
+        )}`
+      : "Legacy / unlinked";
+
+    const activeCount = licence.activations.filter(
+      a => !a.deactivatedAt,
+    ).length;
+
+    const canDelete = ["SUSPENDED", "REVOKED", "EXPIRED"].includes(
+      licence.status,
+    );
+
+    const body = `
+      ${notice}
+
+      <div class="split customer-detail">
+        <section class="panel">
+          <h2>${escapeHtml(licence.product.name)}</h2>
+
+          <form
+            class="form-grid"
+            action="/admin/licenses/${escapeHtml(licence.id)}/update"
+            method="post"
+          >
+            <label>
+              Customer
+              <input
+                value="${escapeHtml(
+                  licence.customer?.name ||
+                    licence.customer?.email ||
+                    "Unassigned",
+                )}"
+                disabled
+              >
+            </label>
+
+            <label>
+              Subscription
+              <input
+                value="${escapeHtml(subscriptionText)}"
+                disabled
+              >
+            </label>
+
+            <div class="form-grid two">
+              <label>
+                Activation limit
+                <input
+                  type="number"
+                  name="activation_limit"
+                  min="1"
+                  max="1000"
+                  value="${licence.activationLimit}"
+                >
+              </label>
+
+              <label>
+                Expiry
+                <input
+                  type="date"
+                  name="expires_at"
+                  value="${escapeHtml(expiry)}"
+                >
+              </label>
+            </div>
+
+            <button class="button primary" type="submit">
+              Save licence
+            </button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Licence overview</h2>
+
+          <dl class="detail-list">
+            <div>
+              <dt>Key</dt>
+              <dd>•••• ${escapeHtml(licence.keyLastFour)}</dd>
+            </div>
+
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <span class="status ${licence.status.toLowerCase()}">
+                  ${escapeHtml(licence.status)}
+                </span>
+              </dd>
+            </div>
+
+            <div>
+              <dt>Active activations</dt>
+              <dd>${activeCount} / ${licence.activationLimit}</dd>
+            </div>
+
+            <div>
+              <dt>Created</dt>
+              <dd>${date(licence.createdAt)}</dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>Licence controls</h2>
+
+        <p class="muted">
+          Permanent deletion is only available once the licence is inactive.
+        </p>
+
+        <div class="actions">
+          <form
+            method="post"
+            action="/admin/licenses/${escapeHtml(licence.id)}/action"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="reactivate"
+            >
+
+            <button class="button secondary" type="submit">
+              Reactivate
+            </button>
+          </form>
+
+          <form
+            method="post"
+            action="/admin/licenses/${escapeHtml(licence.id)}/action"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="suspend"
+            >
+
+            <button class="button warning" type="submit">
+              Suspend
+            </button>
+          </form>
+
+          <form
+            method="post"
+            action="/admin/licenses/${escapeHtml(licence.id)}/action"
+            onsubmit="return confirm('Revoke this licence? It will immediately stop validating.');"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="revoke"
+            >
+
+            <button class="button danger" type="submit">
+              Revoke
+            </button>
+          </form>
+
+          <form
+            method="post"
+            action="/admin/licenses/${escapeHtml(licence.id)}/action"
+            onsubmit="return confirm('Reset all active installations for this licence?');"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="reset_activations"
+            >
+
+            <button class="button secondary" type="submit">
+              Reset activations
+            </button>
+          </form>
+
+          <form
+            method="post"
+            action="/admin/licenses/${escapeHtml(licence.id)}/action"
+            onsubmit="return confirm('Generate a replacement key? The old key will stop working immediately and the new key will only be shown once.');"
+          >
+            <input
+              type="hidden"
+              name="action"
+              value="regenerate"
+            >
+
+            <button class="button danger" type="submit">
+              Regenerate key
+            </button>
+          </form>
+
+          ${
+            canDelete
+              ? `
+                <form
+                  method="post"
+                  action="/admin/licenses/${escapeHtml(licence.id)}/delete"
+                  onsubmit="return confirm('Permanently delete this licence, its activation history and stored delivery record? This cannot be undone.');"
+                >
+                  <button class="button danger" type="submit">
+                    Delete permanently
+                  </button>
+                </form>
+              `
+              : ""
+          }
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Activation history</h2>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Site</th>
+                <th>Version</th>
+                <th>Activated</th>
+                <th>Last checked</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                licence.activations.length
+                  ? licence.activations
+                      .map(
+                        a => `
+                          <tr>
+                            <td>${escapeHtml(a.siteUrl)}</td>
+                            <td>${escapeHtml(a.pluginVersion || "—")}</td>
+                            <td>${date(a.activatedAt)}</td>
+                            <td>${date(a.lastCheckedAt)}</td>
+                            <td>
+                              ${
+                                a.deactivatedAt
+                                  ? `<span class="status expired">Deactivated</span>`
+                                  : `<span class="status active">Active</span>`
+                              }
+                            </td>
+                          </tr>
+                        `,
+                      )
+                      .join("")
+                  : `
+                    <tr>
+                      <td colspan="5" class="muted">
+                        No activations yet.
+                      </td>
+                    </tr>
+                  `
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+
+    res.send(
+      layout(
+        "Manage licence",
+        body,
+        "licenses",
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
 router.post("/licenses/:id/update", async (req, res, next) => {
   try {
     const activationLimit = Math.max(1, Math.min(1000, Number.parseInt(String(req.body.activation_limit ?? "1"), 10) || 1));
