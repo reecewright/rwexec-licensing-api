@@ -653,10 +653,11 @@ router.post("/customers/:id/portal-link", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.get("/products", async (_req, res, next) => {
+router.get("/products", async (req, res, next) => {
   try {
     const products = await prisma.product.findMany({ orderBy: { name: "asc" }, include: { _count: { select: { plans: true, licenses: true, subscriptions: true } } } });
-    const body = `<div class="split"><section class="panel"><h2>Products</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Slug</th><th>Plans</th><th>Subscriptions</th><th>Status</th></tr></thead><tbody>${products.map(p => `<tr><td>${escapeHtml(p.name)}</td><td><code>${escapeHtml(p.slug)}</code></td><td>${p._count.plans}</td><td>${p._count.subscriptions}</td><td>${p.active ? "Active" : "Inactive"}</td></tr>`).join("")}</tbody></table></div></section><section class="panel"><h2>Add product</h2><form class="form-grid" action="/admin/products" method="post"><label>Name<input name="name" required></label><label>Slug<input name="slug" placeholder="rwexec-product" required></label><label>Description<textarea name="description" rows="3"></textarea></label><button class="button primary" type="submit">Create product</button></form></section></div>`;
+    const message = req.query.deleted === "1" ? `<div class="alert success">Product permanently deleted.</div>` : "";
+    const body = `${message}<div class="split"><section class="panel"><h2>Products</h2><div class="table-wrap"><table><thead><tr><th>Product</th><th>Slug</th><th>Plans</th><th>Subscriptions</th><th>Status</th><th></th></tr></thead><tbody>${products.length ? products.map(p => `<tr><td>${escapeHtml(p.name)}</td><td><code>${escapeHtml(p.slug)}</code></td><td>${p._count.plans}</td><td>${p._count.subscriptions}</td><td>${p.active ? "Active" : "Inactive"}</td><td><a class="table-action" href="/admin/products/${escapeHtml(p.id)}">Manage</a></td></tr>`).join("") : `<tr><td colspan="6" class="muted">No products yet.</td></tr>`}</tbody></table></div></section><section class="panel"><h2>Add product</h2><form class="form-grid" action="/admin/products" method="post"><label>Name<input name="name" required></label><label>Slug<input name="slug" placeholder="rwexec-product" required></label><label>Description<textarea name="description" rows="3"></textarea></label><button class="button primary" type="submit">Create product</button></form></section></div>`;
     res.send(layout("Products", body, "products"));
   } catch (error) { next(error); }
 });
@@ -666,8 +667,73 @@ router.post("/products", async (req, res, next) => {
     const name = String(req.body.name ?? "").trim();
     const slug = String(req.body.slug ?? "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
     if (!name || !slug) return res.status(400).send(layout("Products", `<div class="alert error">Name and slug are required.</div>`, "products"));
+    const existing = await prisma.product.findUnique({ where: { slug } });
+    if (existing) return res.status(409).send(layout("Products", `<div class="alert error">That product slug is already in use.</div>`, "products"));
     await prisma.product.create({ data: { name, slug, description: String(req.body.description ?? "").trim() || null } });
     res.redirect("/admin/products");
+  } catch (error) { next(error); }
+});
+
+router.get("/products/:id", async (req, res, next) => {
+  try {
+    const product = await prisma.product.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { plans: true, licenses: true, subscriptions: true } } },
+    });
+    if (!product) return res.status(404).send(layout("Product not found", `<div class="alert error">Product not found.</div>`, "products"));
+
+    const saved = req.query.saved === "1" ? `<div class="alert success">Product updated.</div>` : "";
+    const canDelete = product._count.subscriptions === 0 && product._count.licenses === 0;
+    const body = `${saved}<div class="split"><section class="panel"><h2>Manage product</h2><form class="form-grid" action="/admin/products/${escapeHtml(product.id)}/update" method="post"><label>Name<input name="name" value="${escapeHtml(product.name)}" required></label><label>Slug<span class="muted">Changing this changes the product identifier used by RWExec checkout and integrations.</span><input name="slug" value="${escapeHtml(product.slug)}" required></label><label>Description<textarea name="description" rows="4">${escapeHtml(product.description || "")}</textarea></label><label class="checkbox-card"><input type="checkbox" name="active" value="1" ${product.active ? "checked" : ""}><span class="checkbox-copy"><span class="checkbox-title">Product active</span><span class="checkbox-help">Inactive products remain in existing records but are unavailable for new setup where active products are required.</span></span></label><button class="button primary" type="submit">Save product</button></form></section><section class="panel"><h2>Product overview</h2><dl class="detail-list"><div><dt>Plans</dt><dd>${product._count.plans}</dd></div><div><dt>Subscriptions</dt><dd>${product._count.subscriptions}</dd></div><div><dt>Licences</dt><dd>${product._count.licenses}</dd></div><div><dt>Status</dt><dd>${product.active ? "Active" : "Inactive"}</dd></div></dl></section></div><section class="panel"><h2>Product controls</h2>${canDelete ? `<p class="muted">Permanent deletion removes this RWExec product and its plans. Stripe products and prices are not changed.</p><form method="get" action="/admin/products/${escapeHtml(product.id)}/delete-confirmation"><button class="button danger" type="submit">Delete product</button></form>` : `<div class="alert warning">This product cannot be deleted while it has subscriptions or licences. Remove those records first, or make the product inactive if it should no longer be offered.</div>`}</section>`;
+    res.send(layout("Manage product", body, "products"));
+  } catch (error) { next(error); }
+});
+
+router.post("/products/:id/update", async (req, res, next) => {
+  try {
+    const product = await prisma.product.findUnique({ where: { id: req.params.id } });
+    if (!product) return res.status(404).send(layout("Product not found", `<div class="alert error">Product not found.</div>`, "products"));
+    const name = String(req.body.name ?? "").trim();
+    const slug = String(req.body.slug ?? "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const description = String(req.body.description ?? "").trim() || null;
+    const active = req.body.active === "1";
+    if (!name || !slug) return res.status(400).send(layout("Product", `<div class="alert error">Name and slug are required.</div>`, "products"));
+    const existing = await prisma.product.findFirst({ where: { slug, NOT: { id: product.id } } });
+    if (existing) return res.status(409).send(layout("Product", `<div class="alert error">That product slug is already in use.</div>`, "products"));
+    await prisma.product.update({ where: { id: product.id }, data: { name, slug, description, active } });
+    await writeAudit({ action: "product.updated", entityType: "product", entityId: product.id, summary: `Product updated: ${name}`, metadata: { oldSlug: product.slug, newSlug: slug, active } });
+    res.redirect(`/admin/products/${encodeURIComponent(product.id)}?saved=1`);
+  } catch (error) { next(error); }
+});
+
+router.get("/products/:id/delete-confirmation", async (req, res, next) => {
+  try {
+    const product = await prisma.product.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { plans: true, licenses: true, subscriptions: true } } },
+    });
+    if (!product) return res.status(404).send(layout("Product not found", `<div class="alert error">Product not found.</div>`, "products"));
+    if (product._count.subscriptions > 0 || product._count.licenses > 0) {
+      return res.status(400).send(layout("Cannot delete product", `<section class="panel"><h2>Cannot delete product</h2><div class="alert error">This product still has ${product._count.subscriptions} subscription${product._count.subscriptions === 1 ? "" : "s"} and ${product._count.licenses} licence${product._count.licenses === 1 ? "" : "s"}. Remove those records before permanently deleting the product.</div><form method="get" action="/admin/products/${escapeHtml(product.id)}"><button class="button secondary" type="submit">Go back</button></form></section>`, "products"));
+    }
+    const body = `<section class="panel"><h2>Permanently delete product?</h2><div class="alert warning">This permanently deletes the RWExec product and its ${product._count.plans} plan${product._count.plans === 1 ? "" : "s"}. Stripe products and prices are not changed. This cannot be undone.</div><dl class="detail-list"><div><dt>Product</dt><dd>${escapeHtml(product.name)}</dd></div><div><dt>Slug</dt><dd>${escapeHtml(product.slug)}</dd></div><div><dt>Plans to delete</dt><dd>${product._count.plans}</dd></div><div><dt>Subscriptions</dt><dd>${product._count.subscriptions}</dd></div><div><dt>Licences</dt><dd>${product._count.licenses}</dd></div></dl><div class="actions"><form method="get" action="/admin/products/${escapeHtml(product.id)}"><button class="button secondary" type="submit">Go back</button></form><form method="post" action="/admin/products/${escapeHtml(product.id)}/delete"><button class="button danger" type="submit">Delete product permanently</button></form></div></section>`;
+    res.send(layout("Delete product", body, "products"));
+  } catch (error) { next(error); }
+});
+
+router.post("/products/:id/delete", async (req, res, next) => {
+  try {
+    const product = await prisma.product.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { plans: true, licenses: true, subscriptions: true } } },
+    });
+    if (!product) return res.status(404).send(layout("Product not found", `<div class="alert error">Product not found.</div>`, "products"));
+    if (product._count.subscriptions > 0 || product._count.licenses > 0) {
+      return res.status(400).send(layout("Cannot delete product", `<section class="panel"><h2>Cannot delete product</h2><div class="alert error">This product now has subscriptions or licences and cannot be deleted.</div><form method="get" action="/admin/products/${escapeHtml(product.id)}"><button class="button secondary" type="submit">Go back</button></form></section>`, "products"));
+    }
+    await prisma.product.delete({ where: { id: product.id } });
+    await writeAudit({ action: "product.deleted", entityType: "product", entityId: product.id, summary: `Product permanently deleted: ${product.name}`, metadata: { slug: product.slug, deletedPlans: product._count.plans } });
+    res.redirect("/admin/products?deleted=1");
   } catch (error) { next(error); }
 });
 
@@ -1529,6 +1595,15 @@ router.get("/licenses/:id", async (req, res, next) => {
                     licence.customer?.email ||
                     "Unassigned",
                 )}"
+                disabled
+              >
+            </label>
+
+            <label>
+              Customer email
+              <input
+                type="email"
+                value="${escapeHtml(licence.customer?.email || "Unassigned")}"
                 disabled
               >
             </label>
