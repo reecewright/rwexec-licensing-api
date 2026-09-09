@@ -937,7 +937,7 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
           <div class="card-head">
             <div>
               <div class="eyebrow">${escapeHtml(subscriptionDisplayName(subscription))}</div>
-              <h2>${escapeHtml(subscription.product.name)} licence</h2>
+              <h2>${escapeHtml(subscription.product.name)} Licence</h2>
               <div class="subscription-meta">
                 <span>•••• ${escapeHtml(licence.keyLastFour)}</span>
                 <span>${licence.activations.length} / ${licence.activationLimit} sites</span>

@@ -41,9 +41,22 @@ async function sendEmailChangeMessage(input: {
         <div style="font-size:24px;font-weight:800;color:#ffffff;letter-spacing:.3px">RWExec</div>
       </div>
       <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:28px">
-        <h1 style="font-size:22px;margin:0 0 12px">Confirm your email address</h1>
+        <h1 style="font-size:22px;margin:0 0 12px">Confirm Your Email Address</h1>
         <p style="line-height:1.6;margin:0 0 20px">Use the button below to confirm this email address for your RWExec account. The link expires in 30 minutes.</p>
-        <a href="${input.verifyUrl}" style="display:inline-block;background:#fe6b02;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:8px">Confirm email address</a>
+        <a
+  href="${input.verifyUrl}"
+  style="
+    display:inline-block;
+    background:#fe6b02;
+    color:#111111;
+    text-decoration:none;
+    font-weight:700;
+    padding:12px 18px;
+    border-radius:8px;
+  "
+>
+  Confirm Email Address
+</a>
         <p style="font-size:13px;color:#6b7280;line-height:1.5;margin:22px 0 0">If you did not request this change, you can ignore this email and your current sign-in email will stay unchanged.</p>
       </div>
     </div>
@@ -80,7 +93,9 @@ export async function requestCustomerEmailChange(input: {
     throw new Error("That is already your account email address.");
   }
 
-  const existing = await prisma.customer.findUnique({ where: { email: newEmail } });
+  const existing = await prisma.customer.findUnique({
+    where: { email: newEmail },
+  });
   if (existing && existing.id !== customer.id) {
     throw new Error("That email address is already in use.");
   }
