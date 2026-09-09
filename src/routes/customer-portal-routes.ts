@@ -204,8 +204,7 @@ function subscriptionDisplayName(subscription: {
   product: { name: string };
   plan: { name: string } | null;
 }) {
-  return subscription.label?.trim() ||
-    `${subscription.product.name}${subscription.plan ? ` · ${subscription.plan.name}` : ""}`;
+  return subscription.label?.trim() || subscription.product.name;
 }
 
 type SubscriptionLifecycle = "active" | "ending" | "expired" | "attention";
