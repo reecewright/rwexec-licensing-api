@@ -197,7 +197,7 @@ function emailTemplate(input: {
                   style="
                     height:46px;
                     v-text-anchor:middle;
-                    width:180px;
+                    width:220px;
                   "
                   arcsize="12%"
                   stroke="f"
