@@ -921,158 +921,110 @@ router.get("/licenses/:id", async (req, res, next) => {
       </div>
 
       <section class="panel">
-        <h2>Licence controls</h2>
+  <h2>Licence controls</h2>
 
-        <p class="muted">
-          Permanent deletion is only available once the licence is inactive.
-        </p>
+  <p class="muted">
+    Permanent deletion is only available once the licence is inactive.
+  </p>
 
-        <div class="actions">
+  <div class="actions">
+    <form
+      method="post"
+      action="/admin/licenses/${escapeHtml(licence.id)}/action"
+      onsubmit="return confirm('Reactivate this licence? It will be allowed to validate again.');"
+    >
+      <input
+        type="hidden"
+        name="action"
+        value="reactivate"
+      >
+
+      <button class="button secondary" type="submit">
+        Reactivate
+      </button>
+    </form>
+
+    <form
+      method="post"
+      action="/admin/licenses/${escapeHtml(licence.id)}/action"
+      onsubmit="return confirm('Suspend this licence? It will stop validating until reactivated.');"
+    >
+      <input
+        type="hidden"
+        name="action"
+        value="suspend"
+      >
+
+      <button class="button warning" type="submit">
+        Suspend
+      </button>
+    </form>
+
+    <form
+      method="post"
+      action="/admin/licenses/${escapeHtml(licence.id)}/action"
+      onsubmit="return confirm('Revoke this licence? It will immediately stop validating.');"
+    >
+      <input
+        type="hidden"
+        name="action"
+        value="revoke"
+      >
+
+      <button class="button danger" type="submit">
+        Revoke
+      </button>
+    </form>
+
+    <form
+      method="post"
+      action="/admin/licenses/${escapeHtml(licence.id)}/action"
+      onsubmit="return confirm('Reset all active installations for this licence? All currently activated sites will be disconnected.');"
+    >
+      <input
+        type="hidden"
+        name="action"
+        value="reset_activations"
+      >
+
+      <button class="button secondary" type="submit">
+        Reset activations
+      </button>
+    </form>
+
+    <form
+      method="post"
+      action="/admin/licenses/${escapeHtml(licence.id)}/action"
+      onsubmit="return confirm('Generate a replacement licence key? The current key will stop working immediately and the new key will only be shown once.');"
+    >
+      <input
+        type="hidden"
+        name="action"
+        value="regenerate"
+      >
+
+      <button class="button danger" type="submit">
+        Regenerate key
+      </button>
+    </form>
+
+    ${
+      canDelete
+        ? `
           <form
             method="post"
-            action="/admin/licenses/${escapeHtml(licence.id)}/action"
+            action="/admin/licenses/${escapeHtml(licence.id)}/delete"
+            onsubmit="return confirm('Permanently delete this licence, its activation history and stored delivery record? This cannot be undone.');"
           >
-            <input
-              type="hidden"
-              name="action"
-              value="reactivate"
-            >
-
-            <button class="button secondary" type="submit">
-              Reactivate
-            </button>
-          </form>
-
-          <form
-            method="post"
-            action="/admin/licenses/${escapeHtml(licence.id)}/action"
-          >
-            <input
-              type="hidden"
-              name="action"
-              value="suspend"
-            >
-
-            <button class="button warning" type="submit">
-              Suspend
-            </button>
-          </form>
-
-          <form
-            method="post"
-            action="/admin/licenses/${escapeHtml(licence.id)}/action"
-            onsubmit="return confirm('Revoke this licence? It will immediately stop validating.');"
-          >
-            <input
-              type="hidden"
-              name="action"
-              value="revoke"
-            >
-
             <button class="button danger" type="submit">
-              Revoke
+              Delete permanently
             </button>
           </form>
-
-          <form
-            method="post"
-            action="/admin/licenses/${escapeHtml(licence.id)}/action"
-            onsubmit="return confirm('Reset all active installations for this licence?');"
-          >
-            <input
-              type="hidden"
-              name="action"
-              value="reset_activations"
-            >
-
-            <button class="button secondary" type="submit">
-              Reset activations
-            </button>
-          </form>
-
-          <form
-            method="post"
-            action="/admin/licenses/${escapeHtml(licence.id)}/action"
-            onsubmit="return confirm('Generate a replacement key? The old key will stop working immediately and the new key will only be shown once.');"
-          >
-            <input
-              type="hidden"
-              name="action"
-              value="regenerate"
-            >
-
-            <button class="button danger" type="submit">
-              Regenerate key
-            </button>
-          </form>
-
-          ${
-            canDelete
-              ? `
-                <form
-                  method="post"
-                  action="/admin/licenses/${escapeHtml(licence.id)}/delete"
-                  onsubmit="return confirm('Permanently delete this licence, its activation history and stored delivery record? This cannot be undone.');"
-                >
-                  <button class="button danger" type="submit">
-                    Delete permanently
-                  </button>
-                </form>
-              `
-              : ""
-          }
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Activation history</h2>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Site</th>
-                <th>Version</th>
-                <th>Activated</th>
-                <th>Last checked</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${
-                licence.activations.length
-                  ? licence.activations
-                      .map(
-                        a => `
-                          <tr>
-                            <td>${escapeHtml(a.siteUrl)}</td>
-                            <td>${escapeHtml(a.pluginVersion || "—")}</td>
-                            <td>${date(a.activatedAt)}</td>
-                            <td>${date(a.lastCheckedAt)}</td>
-                            <td>
-                              ${
-                                a.deactivatedAt
-                                  ? `<span class="status expired">Deactivated</span>`
-                                  : `<span class="status active">Active</span>`
-                              }
-                            </td>
-                          </tr>
-                        `,
-                      )
-                      .join("")
-                  : `
-                    <tr>
-                      <td colspan="5" class="muted">
-                        No activations yet.
-                      </td>
-                    </tr>
-                  `
-              }
-            </tbody>
-          </table>
-        </div>
-      </section>
+        `
+        : ""
+    }
+  </div>
+</section>
     `;
 
     res.send(
