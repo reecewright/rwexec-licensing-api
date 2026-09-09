@@ -98,7 +98,7 @@ app.get("/checkout/:productSlug/:planSlug", async (req, res, next) => {
       successUrl:
         "https://account.rwexec.com/checkout-success?session_id={CHECKOUT_SESSION_ID}",
       cancelUrl:
-        "https://rwexec.com/reservations",
+        "https://rwexec.com/plugins#rwexec-reservations",
     });
 
     if (!session.url || typeof session.url !== "string") {
