@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { writeAudit } from "./audit-service.js";
+import { sendCustomerEmailChangeEmail } from "./email-service.js";
 
 const EMAIL_CHANGE_TTL_MS = 30 * 60 * 1000;
 
@@ -123,10 +124,10 @@ export async function requestCustomerEmailChange(input: {
   });
 
   try {
-    await sendEmailChangeMessage({
-      to: newEmail,
-      verifyUrl: input.verifyUrlForToken(rawToken),
-    });
+    await sendCustomerEmailChangeEmail(
+      newEmail,
+      input.verifyUrlForToken(rawToken)
+    );
   } catch (error) {
     await prisma.customerEmailChangeToken.deleteMany({
       where: { tokenHash },

@@ -383,3 +383,22 @@ export async function sendCustomerPortalEmail(
 
   return result;
 }
+
+export async function sendCustomerEmailChangeEmail(
+  to: string,
+  verifyUrl: string,
+) {
+  const html = emailTemplate({
+    heading: "Confirm Your Email Address",
+    intro:
+      "Use the secure link below to confirm this email address for your RWExec account.",
+    buttonText: "Confirm Email Address",
+    link: verifyUrl,
+  });
+
+  return sendEmail(
+    to,
+    "Confirm your new RWExec email address",
+    html,
+  );
+}
