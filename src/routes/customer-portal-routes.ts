@@ -318,9 +318,9 @@ function navLink(
 }
 
 function logoBlock(req: Request, compact = false) {
-  return `<div class="account-brand ${compact ? "account-brand--compact" : ""}">
+  return `<a class="account-brand ${compact ? "account-brand--compact" : ""}" href="https://rwexec.com" aria-label="Back to RWExec">
     <img src="${portalPath(req, "/assets/rwexec-logo.png")}" alt="RWExec">
-  </div>`;
+  </a>`;
 }
 
 function baseHead(req: Request, title: string, extraCss = "") {
@@ -338,13 +338,15 @@ function baseHead(req: Request, title: string, extraCss = "") {
     :root { --rw-orange:#fe6b02; --rw-ink:#111827; --rw-muted:#64748b; --rw-line:#e5e7eb; --rw-bg:#f5f7fb; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--rw-bg); color:var(--rw-ink); }
-    .account-brand { display:flex; align-items:center; justify-content:center; background:#0b0f17; border-radius:12px; padding:14px 18px; }
-    .account-brand img { display:block; width:190px; height:auto; }
+    .account-brand { display:flex; align-items:center; justify-content:center; background:#0b0f17; border-radius:12px; padding:14px 18px; text-decoration:none; }
+    .account-brand img { display:block; width:min(380px,100%); height:auto; }
     .account-brand--compact img { width:170px; }
     .account-login { min-height:100vh; display:grid; place-items:center; padding:28px 18px; }
     .account-login__card { width:min(520px,100%); background:#fff; border:1px solid var(--rw-line); border-radius:16px; padding:28px; box-shadow:0 12px 36px rgba(15,23,42,.08); }
     .account-login__card .account-brand { margin-bottom:24px; }
     .account-login__card h1 { margin:0 0 8px; }
+    .account-login__back { display:block; margin-top:16px; text-align:center; color:var(--rw-muted); font-size:14px; font-weight:700; text-decoration:none; }
+    .account-login__back:hover { color:var(--rw-orange); }
     .account-layout { min-height:100vh; display:grid; grid-template-columns:260px minmax(0,1fr); }
     .account-sidebar { position:sticky; top:0; height:100vh; background:#0b0f17; padding:22px 18px; display:flex; flex-direction:column; gap:22px; }
     .account-sidebar .account-brand { padding:8px 6px 18px; border-radius:0; justify-content:flex-start; }
@@ -467,7 +469,9 @@ function baseHead(req: Request, title: string, extraCss = "") {
 }
 
 function publicShell(req: Request, title: string, body: string) {
-  return `${baseHead(req, title)}<body><main class="account-login">${body}</main></body></html>`;
+  const backToRwexec = `<a class="account-login__back" href="https://rwexec.com">← Back to RWExec</a>`;
+  const content = body.replace("</section>", `${backToRwexec}</section>`);
+  return `${baseHead(req, title)}<body><main class="account-login">${content}</main></body></html>`;
 }
 
 function appShell(
@@ -1793,6 +1797,18 @@ customerPortalRouter.post(
     }
   },
 );
+
+customerPortalRouter.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+
+  return res.status(404).send(
+    publicShell(
+      req,
+      "Page not found",
+      `<section class="account-login__card">${logoBlock(req)}<h1>Page not found</h1><p class="muted">The page you were looking for does not exist or may have moved.</p><a class="button primary" href="${portalPath(req)}">Customer Account</a></section>`,
+    ),
+  );
+});
 
 customerPortalRouter.use(
   (error: unknown, req: Request, res: Response, _next: NextFunction) => {
