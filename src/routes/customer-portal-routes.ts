@@ -44,7 +44,8 @@ export const customerPortalRouter = Router();
 const ACCOUNT_HOST = "account.rwexec.com";
 const ENTITLED_STATUSES = ["ACTIVE", "TRIALING", "COMPLIMENTARY"];
 const RESERVATIONS_PRODUCT_NAME = "RWExec Reservations";
-const RESERVATIONS_PLUGIN_FILENAME = "rwexec-reservations-v1.0.0.zip";
+const RESERVATIONS_FREE_PLUGIN_FILENAME = "rwexec-reservations-free-v1.0.0.zip";
+const RESERVATIONS_PRO_PLUGIN_FILENAME = "rwexec-reservations-pro-v1.0.0.zip";
 
 const magicLinkLimiter = rateLimit({
   windowMs: 15 * 60_000,
@@ -878,7 +879,27 @@ customerPortalRouter.post(
   },
 );
 
-customerPortalRouter.get("/downloads/rwexec-reservations", async (req, res, next) => {
+customerPortalRouter.get("/downloads/rwexec-reservations-free", async (req, res, next) => {
+  try {
+    const customer = await requireCustomer(req, res);
+    if (!customer) return res.redirect(portalPath(req));
+
+    const pluginPath = path.resolve(
+      process.cwd(),
+      "src/downloads",
+      RESERVATIONS_FREE_PLUGIN_FILENAME,
+    );
+
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.download(pluginPath, RESERVATIONS_FREE_PLUGIN_FILENAME, (error) => {
+      if (error && !res.headersSent) next(error);
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+customerPortalRouter.get("/downloads/rwexec-reservations-pro", async (req, res, next) => {
   try {
     const customer = await requireCustomer(req, res);
     if (!customer) return res.redirect(portalPath(req));
@@ -896,8 +917,8 @@ customerPortalRouter.get("/downloads/rwexec-reservations", async (req, res, next
         .send(
           publicShell(
             req,
-            "Plugin download unavailable",
-            `<section class="account-login__card">${logoBlock(req)}<h1>Plugin download unavailable</h1><p class="muted">An active RWExec Reservations subscription is required to download the latest plugin.</p><a class="button primary" href="${portalPath(req, "/licenses")}">Back to Licences &amp; Sites</a></section>`,
+            "Pro add-on download unavailable",
+            `<section class="account-login__card">${logoBlock(req)}<h1>Pro add-on download unavailable</h1><p class="muted">An active RWExec Reservations subscription is required to download RWExec Reservations Pro.</p><a class="button primary" href="${portalPath(req, "/licenses")}">Back to Licences &amp; Sites</a></section>`,
           ),
         );
     }
@@ -905,11 +926,11 @@ customerPortalRouter.get("/downloads/rwexec-reservations", async (req, res, next
     const pluginPath = path.resolve(
       process.cwd(),
       "src/downloads",
-      RESERVATIONS_PLUGIN_FILENAME,
+      RESERVATIONS_PRO_PLUGIN_FILENAME,
     );
 
     res.setHeader("Cache-Control", "private, no-store");
-    return res.download(pluginPath, RESERVATIONS_PLUGIN_FILENAME, (error) => {
+    return res.download(pluginPath, RESERVATIONS_PRO_PLUGIN_FILENAME, (error) => {
       if (error && !res.headersSent) next(error);
     });
   } catch (error) {
@@ -1027,11 +1048,48 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
           ? "No licences are currently ending."
           : "No active licences yet.";
 
-    const downloadButton = canDownloadReservations
-      ? `<a class="button secondary" href="${portalPath(req, "/downloads/rwexec-reservations")}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Download Latest Plugin</a>`
-      : "";
+    const pluginDownloads = `<section class="account-card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">Plugin downloads</div>
+          <h2>RWExec Reservations</h2>
+          <p class="muted small" style="margin:6px 0 0">Install the Free/Core plugin first, then install the Pro add-on. Your licence key authorises the Pro features.</p>
+        </div>
+      </div>
 
-    const body = `<div class="page-head"><div><div class="eyebrow">Licences & Sites</div><h1>Licence Usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div>${downloadButton}</div>${deactivated}${reactivationCancelled}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
+      <div class="plan-grid">
+        <div class="plan-option">
+          <h3>RWExec Reservations — Free/Core</h3>
+          <div class="plan-option__meta">Required on every site. Contains the core reservation system and Free features.</div>
+          <a class="button secondary" href="${portalPath(req, "/downloads/rwexec-reservations-free")}">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            Download Free Plugin
+          </a>
+          <div class="muted small" style="margin-top:9px">${escapeHtml(RESERVATIONS_FREE_PLUGIN_FILENAME)}</div>
+        </div>
+
+        <div class="plan-option">
+          <h3>RWExec Reservations Pro</h3>
+          <div class="plan-option__meta">${canDownloadReservations ? "Your subscription includes access to the Pro add-on." : "An active RWExec Reservations subscription is required to download the Pro add-on."}</div>
+          ${
+            canDownloadReservations
+              ? `<a class="button primary" href="${portalPath(req, "/downloads/rwexec-reservations-pro")}">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                  Download Pro Add-on
+                </a>`
+              : `<button class="button secondary" type="button" disabled>Pro subscription required</button>`
+          }
+          <div class="muted small" style="margin-top:9px">${escapeHtml(RESERVATIONS_PRO_PLUGIN_FILENAME)}</div>
+        </div>
+      </div>
+
+      <div class="notice info" style="margin:16px 0 0">
+        <strong>Installation order</strong>
+        1. Install and activate the Free/Core plugin. &nbsp; 2. Install and activate the Pro add-on. &nbsp; 3. Enter your RWExec licence key in WordPress.
+      </div>
+    </section>`;
+
+    const body = `<div class="page-head"><div><div class="eyebrow">Licences & Sites</div><h1>Licence Usage</h1><p>Manage active sites and keep previous licences available if you ever need to reactivate.</p></div></div>${deactivated}${reactivationCancelled}${pluginDownloads}${tabs}${cards.join("") || `<section class="account-card empty-state">${emptyText}</section>`}`;
     return res.send(
       appShell(req, "Licences & Sites", "licenses", customer, body),
     );
