@@ -1052,7 +1052,6 @@ customerPortalRouter.get("/licenses", async (req, res, next) => {
       <div class="card-head">
         <div>
           <div class="eyebrow">Plugin downloads</div>
-          <h2>RWExec Reservations</h2>
           <p class="muted small" style="margin:6px 0 0">Install the Free/Core plugin first, then install the Pro add-on. Your licence key authorises the Pro features.</p>
         </div>
       </div>
